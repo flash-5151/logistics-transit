@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.models.enums import UserRole
 from app.services.expiry import ExpiryService
 from app.services.prediction import PredictionService
+from app.services.donor_ranking import DonorRankingService
 
 router = APIRouter()
 allow_admin = RoleChecker([UserRole.ADMIN])
@@ -51,3 +52,17 @@ async def expiry_alerts(
 ):
     expiry_service = ExpiryService(db)
     return await expiry_service.check_for_expiry_alerts()
+@router.get("/donor-ranking")
+async def donor_ranking(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+
+    ranking_service = DonorRankingService(db)
+
+    result = await ranking_service.rank_donors()
+
+    return {
+        "status": "success",
+        "data": result
+    }
