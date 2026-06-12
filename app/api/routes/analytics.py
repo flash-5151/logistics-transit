@@ -5,6 +5,7 @@ from app.api.dependencies.auth import get_current_user, RoleChecker
 from app.db.session import get_db
 from app.models.enums import UserRole
 from app.services.expiry import ExpiryService
+from app.services.prediction import PredictionService
 
 router = APIRouter()
 allow_admin = RoleChecker([UserRole.ADMIN])
@@ -16,13 +17,13 @@ async def shortage_prediction(
     current_user=Depends(get_current_user)
 ):
     # AI Prediction Integration Placeholder
+    prediction_service = PredictionService(db)
+
+    result = await prediction_service.predict_shortage()
+
     return {
-        "status": "success",
-        "data": {
-            "predicted_shortage_score": 0.15,
-            "high_risk_groups": ["O-", "AB-"],
-            "recommendation": "Increase collection drives for O- negative blood."
-        }
+        " status": "success",
+        "data": result
     }
 
 
