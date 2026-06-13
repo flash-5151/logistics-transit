@@ -1,10 +1,32 @@
-git remote add origin https://github.com/flash-5151/logistics-transit.git
-git branch -M main
-git push -u origin mainvenv/
+# Python virtual environments
+venv/
+.venv/
+.venv_win/
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Environment variables
 .env
 .env.*
+!.env.example
+
+# Database files
 *.sqlite3
+*.db
+
+# IDE directories
 .idea/
 .vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
