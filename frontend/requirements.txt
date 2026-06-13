@@ -1,74 +1,13 @@
-# ============================================================
-#  Frontend Dependencies — Logistics Transit Dashboard
-#  Runtime: Node.js >= 18.x  |  Package Manager: npm
-#  Framework: React 19 + Vite 8 + TypeScript 6
-# ============================================================
-#
-#  To install all dependencies, run:
-#    npm install
-#
-#  To start the development server:
-#    npm run dev
-#
-#  To build for production:
-#    npm run build
-#
-#  To preview the production build:
-#    npm run preview
-# ============================================================
-
-
-# ── Core Framework ───────────────────────────────────────────
-react@^19.2.6                    # UI component library
-react-dom@^19.2.6                # React DOM renderer
-react-router-dom@^7.17.0         # Client-side routing
-
-# ── State Management ─────────────────────────────────────────
-zustand@^5.0.14                  # Lightweight global state management
-
-# ── Styling ──────────────────────────────────────────────────
-tailwindcss@^4.3.1               # Utility-first CSS framework
-@tailwindcss/vite@^4.3.1        # Vite plugin for Tailwind CSS v4
-tailwind-merge@^3.6.0            # Merges Tailwind class conflicts safely
-class-variance-authority@^0.7.1  # Type-safe component variant management
-clsx@^2.1.1                      # Conditional className utility
-
-# ── Icons ────────────────────────────────────────────────────
-lucide-react@^1.18.0             # Lucide icon set for React
-
-# ── Mapping ──────────────────────────────────────────────────
-leaflet@^1.9.4                   # Interactive real map rendering (OpenStreetMap)
-@types/leaflet@^1.9.21           # TypeScript type definitions for Leaflet
-
-# ── HTTP Client ──────────────────────────────────────────────
-axios@^1.17.0                    # Promise-based HTTP client for API calls
-
-
-# ── Dev Dependencies ─────────────────────────────────────────
-vite@^8.0.12                     # Next-generation frontend build tool
-@vitejs/plugin-react@^6.0.1      # Vite plugin for React fast-refresh
-typescript@~6.0.2                # TypeScript compiler
-@types/node@^24.13.2             # Node.js type definitions
-@types/react@^19.2.14            # React type definitions
-@types/react-dom@^19.2.3         # React DOM type definitions
-
-# ── Linting ──────────────────────────────────────────────────
-eslint@^10.3.0                   # JavaScript/TypeScript linter
-@eslint/js@^10.0.1               # ESLint core JS rules
-typescript-eslint@^8.59.2        # TypeScript-aware ESLint rules
-eslint-plugin-react-hooks@^7.1.1 # Lint rules for React Hooks
-eslint-plugin-react-refresh@^0.5.2 # Lint rules for Vite HMR compatibility
-globals@^17.6.0                  # Global variable definitions for ESLint
-
-
-# ============================================================
-#  Node.js Version Requirement
-#  Minimum: Node.js 18.x LTS
-#  Recommended: Node.js 20.x LTS or 22.x LTS
-#
-#  Check your version:
-#    node --version
-#
-#  All exact pinned versions are tracked in package-lock.json
-#  for fully reproducible installs.
-# ============================================================
+@tailwindcss/vite@^4.3.1
+@types/leaflet@^1.9.21
+axios@^1.17.0
+class-variance-authority@^0.7.1
+clsx@^2.1.1
+leaflet@^1.9.4
+lucide-react@^1.18.0
+react@^19.2.6
+react-dom@^19.2.6
+react-router-dom@^7.17.0
+tailwind-merge@^3.6.0
+tailwindcss@^4.3.1
+zustand@^5.0.14
