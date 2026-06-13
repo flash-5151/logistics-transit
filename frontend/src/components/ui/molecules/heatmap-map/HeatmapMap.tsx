@@ -67,11 +67,13 @@ export const HeatmapMap: React.FC<HeatmapMapProps> = ({
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapRef.current, {
-      center: [13.0827, 80.2707], // Chennai, India (customize per your region)
+      center: [13.0827, 80.2707], // Chennai, India
       zoom: 11,
       zoomControl: true,
       attributionControl: true,
-      scrollWheelZoom: true,
+      scrollWheelZoom: false,   // disabled — prevents hijacking page scroll
+      doubleClickZoom: true,    // zoom by double-clicking still works
+      dragging: true,           // panning by drag still works
     });
 
     // OpenStreetMap dark-styled tiles via CartoDB
