@@ -9,6 +9,7 @@ class BloodInventoryBase(BaseModel):
     blood_group: Optional[BloodGroup] = None
     quantity_ml: Optional[int] = None
     expiry_date: Optional[datetime] = None
+    location: Optional[str] = None
 
 
 class BloodInventoryCreate(BloodInventoryBase):
@@ -16,6 +17,7 @@ class BloodInventoryCreate(BloodInventoryBase):
     blood_group: BloodGroup
     quantity_ml: int
     expiry_date: datetime
+    location: str
 
 
 class BloodInventoryUpdate(BloodInventoryBase):

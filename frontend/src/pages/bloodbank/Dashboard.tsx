@@ -8,90 +8,51 @@ import { Stack } from "@/components/layout/primitives/Stack";
 import { Row } from "@/components/layout/primitives";
 import { Button } from "@/components/ui/atoms/Button";
 import { Badge } from "@/components/ui/atoms/Badge";
-
-interface RequestItem {
-  id: string;
-  blood_group: string;
-  volume: number;
-  urgency: "normal" | "urgent" | "emergency";
-  status: "pending" | "matched" | "in_transit" | "delivered";
-  created_at: string;
-}
-
-interface InventoryItem {
-  id: string;
-  blood_group: string;
-  volume: number;
-  expiry_date: string;
-  location: string;
-}
-
-interface TransferItem {
-  id: string;
-  request_id: string;
-  source: string;
-  blood_group: string;
-  volume: number;
-  status: "pending" | "in_transit" | "delivered";
-  eta: string;
-}
-
-const INITIAL_REQUESTS: RequestItem[] = [
-  { id: "REQ-001", blood_group: "O-", volume: 450, urgency: "emergency", status: "pending", created_at: "2026-06-13 14:10" },
-  { id: "REQ-002", blood_group: "A+", volume: 900, urgency: "urgent", status: "in_transit", created_at: "2026-06-13 12:30" },
-  { id: "REQ-003", blood_group: "B-", volume: 600, urgency: "normal", status: "delivered", created_at: "2026-06-12 18:22" },
-  { id: "REQ-004", blood_group: "AB-", volume: 450, urgency: "emergency", status: "matched", created_at: "2026-06-13 09:15" },
-];
-
-const DEFAULT_INVENTORY: InventoryItem[] = [
-  { id: "BAG-801", blood_group: "O-", volume: 450, expiry_date: "2026-06-18", location: "Fridge-A4" },
-  { id: "BAG-802", blood_group: "A+", volume: 900, expiry_date: "2026-07-10", location: "Fridge-B1" },
-  { id: "BAG-803", blood_group: "O+", volume: 1350, expiry_date: "2026-07-22", location: "Fridge-A1" },
-  { id: "BAG-804", blood_group: "AB-", volume: 450, expiry_date: "2026-06-15", location: "Fridge-C2" },
-  { id: "BAG-805", blood_group: "B+", volume: 1800, expiry_date: "2026-08-01", location: "Fridge-B3" },
-];
+import { useAuthStore } from "@/store/authStore";
+import { api } from "@/services/api";
+import type { BloodRequest } from "@/types/request";
+import type { BloodInventory } from "@/types/inventory";
 
 const BloodBankDashboard: React.FC = () => {
-  const [requests, setRequests] = useState<RequestItem[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const { user } = useAuthStore();
+  const bloodBankName = user?.name || "Blood Bank";
+
+  const [requests, setRequests] = useState<BloodRequest[]>([]);
+  const [inventory, setInventory] = useState<BloodInventory[]>([]);
+  const [organizations, setOrganizations] = useState<any[]>([]);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [donationsCount, setDonationsCount] = useState(24);
+  const [donationsCount, setDonationsCount] = useState(0);
 
   useEffect(() => {
-    // Load requests
-    const savedReq = localStorage.getItem("mock_requests");
-    if (savedReq) {
-      setRequests(JSON.parse(savedReq));
-    } else {
-      setRequests(INITIAL_REQUESTS);
-      localStorage.setItem("mock_requests", JSON.stringify(INITIAL_REQUESTS));
-    }
+    const fetchData = async () => {
+      try {
+        const [reqsRes, invRes, donsRes, usersRes] = await Promise.all([
+          api.get("/requests"),
+          api.get("/inventory"),
+          api.get("/donations"),
+          api.get("/donors/all-users"),
+        ]);
+        setRequests(reqsRes.data);
+        setInventory(invRes.data);
+        setDonationsCount(donsRes.data.filter((d: any) => d.blood_bank_id === user?.id).length);
+        setOrganizations(usersRes.data);
+      } catch (err) {
+        console.error("Error loading bloodbank dashboard data:", err);
+      }
+    };
+    fetchData();
+  }, [user]);
 
-    // Load inventory
-    const savedInv = localStorage.getItem("mock_inventory");
-    if (savedInv) {
-      setInventory(JSON.parse(savedInv));
-    } else {
-      setInventory(DEFAULT_INVENTORY);
-      localStorage.setItem("mock_inventory", JSON.stringify(DEFAULT_INVENTORY));
-    }
-
-    // Load donations count
-    const savedDonations = localStorage.getItem("mock_donations");
-    if (savedDonations) {
-      const dons = JSON.parse(savedDonations);
-      setDonationsCount(dons.length + 24);
-    }
-  }, []);
-
-  const totalStockVolume = inventory.reduce((sum, item) => sum + item.volume, 0);
+  // Only display inventory logs that belong to this blood bank
+  const myInventory = inventory.filter(i => i.blood_bank_id === user?.id);
+  const totalStockVolume = myInventory.reduce((sum, item) => sum + item.quantity_ml, 0);
 
   // Compute critical shortages (any types below 500ml or missing completely)
   const allTypes = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
   const criticalShortages: string[] = [];
   allTypes.forEach(type => {
-    const vol = inventory.filter(i => i.blood_group === type).reduce((sum, item) => sum + item.volume, 0);
+    const vol = myInventory.filter(i => i.blood_group === type).reduce((sum, item) => sum + item.quantity_ml, 0);
     if (vol < 500) {
       criticalShortages.push(type);
     }
@@ -99,60 +60,61 @@ const BloodBankDashboard: React.FC = () => {
 
   const pendingRequests = requests.filter(r => r.status === "pending");
 
-  const handleFulfillRequest = (req: RequestItem) => {
-    // Find matching bag in inventory
-    const matchingBagIndex = inventory.findIndex(item => item.blood_group === req.blood_group && item.volume >= req.volume);
+  const getHospitalName = (hospitalId: string) => {
+    const org = organizations.find(o => o.id === hospitalId);
+    return org ? (org.full_name || org.name) : "Hospital";
+  };
 
-    if (matchingBagIndex === -1) {
-      setErrorMsg(`Cannot fulfill request: Insufficient stock of type ${req.blood_group} in inventory (${req.volume}ml required).`);
+  const handleFulfillRequest = async (req: BloodRequest) => {
+    const matchedBag = myInventory.find(item => item.blood_group === req.blood_group && item.quantity_ml >= req.quantity_ml);
+
+    if (!matchedBag) {
+      setErrorMsg(`Cannot fulfill request: Insufficient stock of type ${req.blood_group} in inventory (${req.quantity_ml}ml required).`);
       setTimeout(() => setErrorMsg(null), 5000);
       return;
     }
 
-    const matchedBag = inventory[matchingBagIndex];
-
-    // Deduct volume or delete the bag
-    let updatedInv = [...inventory];
-    if (matchedBag.volume === req.volume) {
-      // remove the bag
-      updatedInv.splice(matchingBagIndex, 1);
-    } else {
-      // deduct
-      updatedInv[matchingBagIndex] = {
-        ...matchedBag,
-        volume: matchedBag.volume - req.volume
+    try {
+      const transferPayload = {
+        sender_id: user?.id,
+        receiver_id: req.hospital_id,
+        request_id: req.id,
+        status: "in_transit",
+        tracking_number: `TRK-${Math.floor(1000 + Math.random() * 9000)}`,
       };
+      
+      // Create transfer
+      await api.post("/transfers/", transferPayload);
+
+      // Update request status to in_progress
+      await api.patch(`/requests/${req.id}`, { status: "in_progress" });
+
+      // Deduct or remove bag
+      if (matchedBag.quantity_ml === req.quantity_ml) {
+        await api.delete(`/inventory/${matchedBag.id}`);
+      } else {
+        await api.put(`/inventory/${matchedBag.id}`, {
+          quantity_ml: matchedBag.quantity_ml - req.quantity_ml
+        });
+      }
+
+      // Re-fetch data
+      const [reqsRes, invRes, donsRes] = await Promise.all([
+        api.get("/requests"),
+        api.get("/inventory"),
+        api.get("/donations"),
+      ]);
+      setRequests(reqsRes.data);
+      setInventory(invRes.data);
+      setDonationsCount(donsRes.data.filter((d: any) => d.blood_bank_id === user?.id).length);
+
+      setSuccessMsg(`Fulfillment approved! Dispatched courier.`);
+      setTimeout(() => setSuccessMsg(null), 5000);
+    } catch (err) {
+      console.error("Fulfillment failed:", err);
+      setErrorMsg("Failed to fulfill request. Please check connections.");
+      setTimeout(() => setErrorMsg(null), 5000);
     }
-
-    // Save inventory
-    setInventory(updatedInv);
-    localStorage.setItem("mock_inventory", JSON.stringify(updatedInv));
-
-    // Update request status to in_transit
-    const updatedReqs = requests.map(r => r.id === req.id ? { ...r, status: "in_transit" as const } : r);
-    setRequests(updatedReqs);
-    localStorage.setItem("mock_requests", JSON.stringify(updatedReqs));
-
-    // Add to mock transfers
-    const savedTransfers = localStorage.getItem("mock_transfers");
-    const transfers: TransferItem[] = savedTransfers ? JSON.parse(savedTransfers) : [
-      { id: "TR-501", request_id: "REQ-002", source: "Red Cross Center", blood_group: "A+", volume: 900, status: "in_transit", eta: "15 mins" },
-    ];
-
-    const newTransfer: TransferItem = {
-      id: `TR-${Math.floor(500 + Math.random() * 500)}`,
-      request_id: req.id,
-      source: "City Central Depot",
-      blood_group: req.blood_group,
-      volume: req.volume,
-      status: "in_transit",
-      eta: "20 mins"
-    };
-    
-    localStorage.setItem("mock_transfers", JSON.stringify([newTransfer, ...transfers]));
-
-    setSuccessMsg(`Fulfillment approved! Dispatched courier ${newTransfer.id} from Fridge location ${matchedBag.location}.`);
-    setTimeout(() => setSuccessMsg(null), 5000);
   };
 
   const getUrgencyBadge = (urgency: string) => {
@@ -190,7 +152,7 @@ const BloodBankDashboard: React.FC = () => {
 
         <div>
           <h2 className="text-2xl font-bold text-text-primary">
-            Welcome Back, Inventory Manager
+            Welcome Back, {bloodBankName} Staff
           </h2>
           <p className="text-text-secondary text-sm">
             Manage your stock levels, log donations, and monitor incoming requests.
@@ -204,7 +166,7 @@ const BloodBankDashboard: React.FC = () => {
             icon={<Package className="text-primary" />}
             trend={
               <span className="text-xs text-text-secondary font-medium">
-                {inventory.length} bags in cold vault
+                {myInventory.length} bags in cold vault
               </span>
             }
           />
@@ -241,9 +203,9 @@ const BloodBankDashboard: React.FC = () => {
             {pendingRequests.length > 0 ? (
               <Stack gap="sm">
                 {pendingRequests.map((req) => {
-                  const hasStock = inventory.some(i => i.blood_group === req.blood_group && i.volume >= req.volume);
-                  const isEmergency = req.urgency === "emergency";
-                  const isUrgent = req.urgency === "urgent";
+                  const hasStock = myInventory.some(i => i.blood_group === req.blood_group && i.quantity_ml >= req.quantity_ml);
+                  const isEmergency = req.priority === "emergency";
+                  const isUrgent = req.priority === "urgent";
                   
                   return (
                     <div 
@@ -268,14 +230,14 @@ const BloodBankDashboard: React.FC = () => {
                         </div>
                         <Stack gap="xs" className="flex-1">
                           <Row gap="xs" className="items-center">
-                            {getUrgencyBadge(req.urgency)}
+                            {getUrgencyBadge(req.priority || "normal")}
                             <span className="text-xs text-text-secondary font-mono font-semibold">ID: {req.id}</span>
                           </Row>
                           <h4 className="font-bold text-sm text-text-primary">
-                            Hospital Request for <span className="text-primary font-bold">{req.volume} ml</span>
+                            {getHospitalName(req.hospital_id)} requesting <span className="text-primary font-bold">{req.quantity_ml} ml</span> of {req.blood_group} blood
                           </h4>
                           <p className="text-xs text-text-secondary flex items-center gap-1 leading-none">
-                            <MapPin className="h-3.5 w-3.5 text-text-secondary/80" /> Broadcasted {req.created_at}
+                            <MapPin className="h-3.5 w-3.5 text-text-secondary/80" /> Broadcasted {new Date(req.created_at).toLocaleDateString()}
                           </p>
                         </Stack>
                       </Row>
@@ -307,35 +269,41 @@ const BloodBankDashboard: React.FC = () => {
               <Package className="h-5 w-5 text-success" /> Cold Vault Stock
             </h3>
             
-            <Stack gap="sm" className="max-h-[350px] overflow-y-auto pr-1">
-              {inventory.map((item) => {
-                const expDate = new Date(item.expiry_date);
-                const today = new Date();
-                const diffTime = expDate.getTime() - today.getTime();
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                const isNearExpiry = diffDays <= 7;
-                
-                return (
-                  <div key={item.id} className="p-3.5 border border-border bg-surface hover:bg-border/5 rounded-xl flex items-center justify-between transition-colors shadow-xs">
-                    <Row gap="sm" className="items-center">
-                      <div className="h-9 w-9 rounded-full bg-primary/5 text-primary flex items-center justify-center font-bold text-sm border border-primary/10 shrink-0">
-                        {item.blood_group}
-                      </div>
-                      <Stack gap="xs">
-                        <Row gap="xs" className="items-center leading-none">
-                          <span className="font-bold text-xs text-text-primary">{item.location}</span>
-                          <span className="text-xs text-text-secondary font-mono font-semibold">({item.id})</span>
-                        </Row>
-                        <p className={`text-xs font-bold leading-none ${isNearExpiry ? "text-danger" : "text-success"}`}>
-                          {isNearExpiry ? `Expiring in ${diffDays} days!` : `Expires: ${item.expiry_date}`}
-                        </p>
-                      </Stack>
-                    </Row>
-                    <span className="font-extrabold text-xs text-text-primary shrink-0">{item.volume} ml</span>
-                  </div>
-                );
-              })}
-            </Stack>
+            {myInventory.length > 0 ? (
+              <Stack gap="sm" className="max-h-[350px] overflow-y-auto pr-1">
+                {myInventory.map((item) => {
+                  const expDate = new Date(item.expiry_date);
+                  const today = new Date();
+                  const diffTime = expDate.getTime() - today.getTime();
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  const isNearExpiry = diffDays <= 7;
+                  
+                  return (
+                    <div key={item.id} className="p-3.5 border border-border bg-surface hover:bg-border/5 rounded-xl flex items-center justify-between transition-colors shadow-xs">
+                      <Row gap="sm" className="items-center">
+                        <div className="h-9 w-9 rounded-full bg-primary/5 text-primary flex items-center justify-center font-bold text-sm border border-primary/10 shrink-0">
+                          {item.blood_group}
+                        </div>
+                        <Stack gap="xs">
+                          <Row gap="xs" className="items-center leading-none">
+                            <span className="font-bold text-xs text-text-primary">{item.location || "Vault-A"}</span>
+                            <span className="text-xs text-text-secondary font-mono font-semibold">({item.id.substring(0, 8)})</span>
+                          </Row>
+                          <p className={`text-xs font-bold leading-none ${isNearExpiry ? "text-danger" : "text-success"}`}>
+                            {isNearExpiry ? `Expiring in ${diffDays} days!` : `Expires: ${new Date(item.expiry_date).toLocaleDateString()}`}
+                          </p>
+                        </Stack>
+                      </Row>
+                      <span className="font-extrabold text-xs text-text-primary shrink-0">{item.quantity_ml} ml</span>
+                    </div>
+                  );
+                })}
+              </Stack>
+            ) : (
+              <div className="text-center py-12 border border-dashed border-border rounded-lg bg-surface/50">
+                <p className="text-text-secondary text-sm">No inventory bags currently in vault.</p>
+              </div>
+            )}
           </div>
         </Grid>
       </Stack>

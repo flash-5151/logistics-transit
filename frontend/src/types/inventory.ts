@@ -4,4 +4,5 @@ export interface BloodInventory {
   blood_group: string;
   quantity_ml: number;
   expiry_date: string;
+  location?: string;
 }

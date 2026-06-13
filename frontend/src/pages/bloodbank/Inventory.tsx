@@ -9,29 +9,17 @@ import { FormField } from "@/components/ui/molecules/form-field";
 import { TableToolbar } from "@/components/ui/molecules/table-toolbar/table-toolbar";
 import { SearchInput } from "@/components/ui/molecules/search-input/search-input";
 import { Stack, Row, Split } from "@/components/layout/primitives";
-
-interface InventoryItem {
-  id: string;
-  blood_group: string;
-  volume: number;
-  expiry_date: string;
-  location: string;
-}
-
-const DEFAULT_INVENTORY: InventoryItem[] = [
-  { id: "BAG-801", blood_group: "O-", volume: 450, expiry_date: "2026-06-18", location: "Fridge-A4" }, // Expiring soon
-  { id: "BAG-802", blood_group: "A+", volume: 900, expiry_date: "2026-07-10", location: "Fridge-B1" },
-  { id: "BAG-803", blood_group: "O+", volume: 1350, expiry_date: "2026-07-22", location: "Fridge-A1" },
-  { id: "BAG-804", blood_group: "AB-", volume: 450, expiry_date: "2026-06-15", location: "Fridge-C2" }, // Expiring soon
-  { id: "BAG-805", blood_group: "B+", volume: 1800, expiry_date: "2026-08-01", location: "Fridge-B3" },
-];
+import { useAuthStore } from "@/store/authStore";
+import { api } from "@/services/api";
+import type { BloodInventory } from "@/types/inventory";
 
 const BloodBankInventory: React.FC = () => {
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const { user } = useAuthStore();
+  const [inventory, setInventory] = useState<BloodInventory[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [bloodGroupFilter, setBloodGroupFilter] = useState("all");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [editingItem, setEditingItem] = useState<BloodInventory | null>(null);
 
   // Form states
   const [bloodGroup, setBloodGroup] = useState("");
@@ -43,19 +31,19 @@ const BloodBankInventory: React.FC = () => {
   const [errors, setErrors] = useState<{ bloodGroup?: string; volume?: string; expiryDate?: string; location?: string }>({});
 
   useEffect(() => {
-    const saved = localStorage.getItem("mock_inventory");
-    if (saved) {
-      setInventory(JSON.parse(saved));
-    } else {
-      setInventory(DEFAULT_INVENTORY);
-      localStorage.setItem("mock_inventory", JSON.stringify(DEFAULT_INVENTORY));
-    }
+    const fetchInventory = async () => {
+      try {
+        const res = await api.get("/inventory");
+        setInventory(res.data);
+      } catch (err) {
+        console.error("Failed to load inventory:", err);
+      }
+    };
+    fetchInventory();
   }, []);
 
-  const saveInventory = (updated: InventoryItem[]) => {
-    setInventory(updated);
-    localStorage.setItem("mock_inventory", JSON.stringify(updated));
-  };
+  // Filter inventory belonging to this blood bank
+  const myInventory = inventory.filter(item => item.blood_bank_id === user?.id);
 
   // Real-time validations
   const validateForm = (field: string, val: string) => {
@@ -102,46 +90,67 @@ const BloodBankInventory: React.FC = () => {
     validateForm(field, value);
   };
 
-  const handleAddStock = (e: React.FormEvent) => {
+  const handleAddStock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (errors.bloodGroup || errors.volume || errors.expiryDate || errors.location || !bloodGroup || !volume || !expiryDate || !location) {
       return;
     }
 
-    const newItem: InventoryItem = {
-      id: `BAG-${Math.floor(800 + Math.random() * 200)}`,
-      blood_group: bloodGroup,
-      volume: parseInt(volume, 10),
-      expiry_date: expiryDate,
-      location,
-    };
+    try {
+      const payload = {
+        blood_bank_id: user?.id,
+        blood_group: bloodGroup,
+        quantity_ml: parseInt(volume, 10),
+        expiry_date: new Date(expiryDate).toISOString(),
+        location: location,
+      };
 
-    const updated = [newItem, ...inventory];
-    saveInventory(updated);
+      const res = await api.post("/inventory/", payload);
+      setInventory([res.data, ...inventory]);
 
-    // Reset
-    setBloodGroup("");
-    setVolume("");
-    setExpiryDate("");
-    setLocation("");
-    setIsAddModalOpen(false);
+      // Reset
+      setBloodGroup("");
+      setVolume("");
+      setExpiryDate("");
+      setLocation("");
+      setIsAddModalOpen(false);
+    } catch (err) {
+      console.error("Failed to add inventory bag:", err);
+      alert("Failed to add inventory. Please check connection.");
+    }
   };
 
-  const handleUpdateVolume = (e: React.FormEvent) => {
+  const handleUpdateItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingItem || errors.volume) return;
+    if (!editingItem || errors.volume || errors.location) return;
 
-    const updated = inventory.map(item => 
-      item.id === editingItem.id ? { ...item, volume: editingItem.volume } : item
-    );
-    saveInventory(updated);
-    setEditingItem(null);
+    try {
+      const payload = {
+        quantity_ml: editingItem.quantity_ml,
+        location: editingItem.location,
+      };
+
+      const res = await api.put(`/inventory/${editingItem.id}`, payload);
+      
+      setInventory(inventory.map(item => 
+        item.id === editingItem.id ? res.data : item
+      ));
+      setEditingItem(null);
+    } catch (err) {
+      console.error("Failed to update inventory bag:", err);
+      alert("Failed to update inventory bag. Please try again.");
+    }
   };
 
-  const handleDeleteItem = (id: string) => {
+  const handleDeleteItem = async (id: string) => {
     if (confirm("Are you sure you want to discard this inventory item?")) {
-      const updated = inventory.filter(item => item.id !== id);
-      saveInventory(updated);
+      try {
+        await api.delete(`/inventory/${id}`);
+        setInventory(inventory.filter(item => item.id !== id));
+      } catch (err) {
+        console.error("Failed to discard inventory bag:", err);
+        alert("Failed to discard inventory bag.");
+      }
     }
   };
 
@@ -154,11 +163,11 @@ const BloodBankInventory: React.FC = () => {
     return diffDays >= 0 && diffDays <= 7;
   };
 
-  const expiringBags = inventory.filter(item => isExpiringSoon(item.expiry_date));
+  const expiringBags = myInventory.filter(item => isExpiringSoon(item.expiry_date));
 
-  const filteredInventory = inventory.filter(item => {
+  const filteredInventory = myInventory.filter(item => {
     const matchesSearch = item.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.location.toLowerCase().includes(searchTerm.toLowerCase());
+                          (item.location && item.location.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesFilter = bloodGroupFilter === "all" || item.blood_group === bloodGroupFilter;
     return matchesSearch && matchesFilter;
   });
@@ -198,7 +207,7 @@ const BloodBankInventory: React.FC = () => {
                 <div className="flex flex-wrap gap-2 mt-2">
                   {expiringBags.map(item => (
                     <span key={item.id} className="inline-flex text-[10px] font-bold bg-amber-500/20 px-2 py-0.5 rounded font-mono">
-                      {item.id} ({item.blood_group}) - {item.location} (Exp: {item.expiry_date})
+                      {item.id.substring(0, 8)} ({item.blood_group}) - {item.location || "Vault"} (Exp: {new Date(item.expiry_date).toLocaleDateString()})
                     </span>
                   ))}
                 </div>
@@ -261,20 +270,20 @@ const BloodBankInventory: React.FC = () => {
                     const isExp = isExpiringSoon(item.expiry_date);
                     return (
                       <tr key={item.id} className="hover:bg-border/5 transition-colors">
-                        <td className="p-4 font-mono font-semibold">{item.id}</td>
+                        <td className="p-4 font-mono font-semibold">{item.id.substring(0, 8)}</td>
                         <td className="p-4">
                           <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
                             {item.blood_group}
                           </span>
                         </td>
-                        <td className="p-4 font-medium">{item.volume} ml</td>
+                        <td className="p-4 font-medium">{item.quantity_ml} ml</td>
                         <td className="p-4">
                           <Row gap="xs" className="items-center">
                             <Calendar className="h-4 w-4 text-text-secondary" />
-                            <span className={isExp ? "text-danger font-semibold" : ""}>{item.expiry_date}</span>
+                            <span className={isExp ? "text-danger font-semibold" : ""}>{new Date(item.expiry_date).toLocaleDateString()}</span>
                           </Row>
                         </td>
-                        <td className="p-4 text-text-secondary font-mono">{item.location}</td>
+                        <td className="p-4 text-text-secondary font-mono">{item.location || "Vault-A"}</td>
                         <td className="p-4">
                           {isExp ? (
                             <Badge variant="danger" className="text-[10px] uppercase font-bold py-0.5">Expiring</Badge>
@@ -386,19 +395,19 @@ const BloodBankInventory: React.FC = () => {
           </div>
         )}
 
-        {/* Modal: Edit Volume Form */}
+        {/* Modal: Edit Item Form */}
         {editingItem && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
             <div className="w-full max-w-md bg-surface rounded-lg border border-border shadow-card overflow-hidden">
               <div className="px-6 py-4 border-b border-border">
-                <h3 className="text-lg font-bold text-text-primary">Update Bag Volume ({editingItem.id})</h3>
+                <h3 className="text-lg font-bold text-text-primary">Update Details ({editingItem.id.substring(0, 8)})</h3>
               </div>
-              <form onSubmit={handleUpdateVolume} className="p-6">
+              <form onSubmit={handleUpdateItem} className="p-6">
                 <Stack gap="md">
                   <FormField label="Adjust Volume (ml)" required error={errors.volume}>
                     <Input
                       type="number"
-                      value={editingItem.volume}
+                      value={editingItem.quantity_ml}
                       onChange={(e) => {
                         const val = e.target.value;
                         const vol = parseInt(val, 10);
@@ -407,9 +416,25 @@ const BloodBankInventory: React.FC = () => {
                         else if (isNaN(vol) || vol <= 0) errStr = "Volume must be greater than 0";
 
                         setErrors(prev => ({ ...prev, volume: errStr || undefined }));
-                        setEditingItem({ ...editingItem, volume: vol });
+                        setEditingItem({ ...editingItem, quantity_ml: vol });
                       }}
                       className={errors.volume ? "border-danger focus-visible:ring-danger" : ""}
+                    />
+                  </FormField>
+
+                  <FormField label="Update Location" required error={errors.location}>
+                    <Input
+                      type="text"
+                      value={editingItem.location || ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        let errStr = "";
+                        if (!val) errStr = "Location is required";
+
+                        setErrors(prev => ({ ...prev, location: errStr || undefined }));
+                        setEditingItem({ ...editingItem, location: val });
+                      }}
+                      className={errors.location ? "border-danger focus-visible:ring-danger" : ""}
                     />
                   </FormField>
 
@@ -417,7 +442,7 @@ const BloodBankInventory: React.FC = () => {
                     <Button type="button" variant="secondary" onClick={() => { setEditingItem(null); setErrors({}); }}>
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={!!errors.volume}>
+                    <Button type="submit" disabled={!!errors.volume || !!errors.location}>
                       Update
                     </Button>
                   </Row>
@@ -431,5 +456,4 @@ const BloodBankInventory: React.FC = () => {
   );
 };
 
-export default BloodBankInventory;
 export { BloodBankInventory };

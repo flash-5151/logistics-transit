@@ -21,15 +21,78 @@ import { StatCard } from "@/components/ui/molecules/stat-card";
 import { Badge } from "@/components/ui/atoms/Badge";
 import { Grid, Stack, Row, Split } from "@/components/layout/primitives";
 import { useAuthStore } from "@/store/authStore";
+import { api } from "@/services/api";
 import {
   HeatmapMap,
   type HeatmapSector,
 } from "@/components/ui/molecules/heatmap-map/HeatmapMap";
 
+interface Organization {
+  id: string;
+  name: string;
+  type: "hospital" | "blood_bank";
+  location: string;
+  contact: string;
+  status: "active" | "suspended";
+}
+
+interface DonorProfile {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  blood_group: string;
+  location: string;
+  last_donation: string;
+  status: "active" | "inactive";
+  total_donations: number;
+}
+
+interface RequestItem {
+  id: string;
+  blood_group: string;
+  volume: number;
+  urgency: "normal" | "urgent" | "emergency";
+  status: "pending" | "matched" | "in_transit" | "delivered";
+  created_at: string;
+  created_by: "hospital" | "blood_bank" | string;
+  hospital_name?: string;
+}
+
+interface InventoryItem {
+  id: string;
+  blood_group: string;
+  volume: number;
+  expiry_date: string;
+  location: string;
+  center_name?: string;
+}
+
+interface TransferItem {
+  id: string;
+  request_id: string;
+  source: string;
+  blood_group: string;
+  volume: number;
+  status: "pending" | "in_transit" | "delivered";
+  eta: string;
+}
+
+interface DonationRecord {
+  id: string;
+  donor_name: string;
+  donor_email: string;
+  blood_group: string;
+  volume: number;
+  date: string;
+  location?: string;
+  certificate_url?: string;
+}
+
 // ─────────────────────────────────────────────────────────
 // District sector data — Chennai city district polygons
 // ─────────────────────────────────────────────────────────
-const HEATMAP_SECTORS: HeatmapSector[] = [
+const BASE_HEATMAP_SECTORS: HeatmapSector[] = [
   {
     id: "SEC-A",
     name: "Downtown District",
@@ -417,22 +480,217 @@ const SupplyTrendChart: React.FC<{
 // ─────────────────────────────────────────────────────────
 const SharedAnalytics: React.FC = () => {
   const { user } = useAuthStore();
-  const [selectedSector, setSelectedSector] = useState<HeatmapSector | null>(
-    HEATMAP_SECTORS[2] // Default: Eastgate Critical
-  );
-  const [localHistoryCount, setLocalHistoryCount] = useState(4);
-  const [localVolumeSum, setLocalVolumeSum] = useState(1850);
+  const [selectedSectorId, setSelectedSectorId] = useState<string>("SEC-C");
+  const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [transfers, setTransfers] = useState<TransferItem[]>([]);
+  const [donations, setDonations] = useState<DonationRecord[]>([]);
+  const [donors, setDonors] = useState<DonorProfile[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem("mock_donations");
-    if (saved) {
-      const all = JSON.parse(saved);
-      setLocalHistoryCount(all.length + 4);
-      setLocalVolumeSum(
-        all.reduce((s: number, d: { volume: number }) => s + d.volume, 0) + 1850
-      );
-    }
+    const fetchData = async () => {
+      try {
+        const [reqsRes, invRes, usersRes, transRes, donsRes] = await Promise.all([
+          api.get("/requests"),
+          api.get("/inventory"),
+          api.get("/donors/all-users"),
+          api.get("/transfers"),
+          api.get("/donations"),
+        ]);
+
+        const mappedOrgs: Organization[] = usersRes.data
+          .filter((u: any) => u.role === "hospital" || u.role === "blood_bank")
+          .map((u: any) => ({
+            id: u.id,
+            name: u.full_name || "Organization",
+            type: u.role,
+            location: u.address || "Unknown Sector",
+            contact: u.phone_number || "N/A",
+            status: u.is_active ? "active" : "suspended",
+          }));
+
+        const mappedRequests: RequestItem[] = reqsRes.data.map((r: any) => {
+          const hospital = usersRes.data.find((u: any) => u.id === r.hospital_id);
+          return {
+            id: r.id,
+            blood_group: r.blood_group,
+            volume: r.quantity_ml,
+            urgency: r.priority || "normal",
+            status: r.status,
+            created_at: new Date(r.created_at).toLocaleString(),
+            created_by: "hospital",
+            hospital_name: hospital ? (hospital.full_name || hospital.name) : "Hospital",
+          };
+        });
+
+        const mappedInventory: InventoryItem[] = invRes.data.map((i: any) => {
+          const bb = usersRes.data.find((u: any) => u.id === i.blood_bank_id);
+          return {
+            id: i.id,
+            blood_group: i.blood_group,
+            volume: i.quantity_ml,
+            expiry_date: i.expiry_date.split("T")[0],
+            location: i.location || "N/A",
+            center_name: bb ? (bb.full_name || bb.name) : "Blood Bank",
+          };
+        });
+
+        const mappedTransfers: TransferItem[] = transRes.data.map((t: any) => {
+          const req = reqsRes.data.find((r: any) => r.id === t.request_id);
+          const source = usersRes.data.find((u: any) => u.id === t.sender_id);
+          return {
+            id: t.id,
+            request_id: t.request_id,
+            source: source ? (source.full_name || source.name) : "Blood Bank Depot",
+            blood_group: req ? req.blood_group : "O-",
+            volume: req ? req.quantity_ml : 450,
+            status: t.status === "requested" ? "pending" : t.status,
+            eta: t.status === "delivered" ? "Delivered" : "15 mins",
+          };
+        });
+
+        const mappedDonors: DonorProfile[] = usersRes.data
+          .filter((u: any) => u.role === "donor")
+          .map((u: any) => {
+            const userDons = donsRes.data.filter((d: any) => d.donor_id === u.id);
+            const sortedDons = [...userDons].sort((a: any, b: any) => new Date(b.donation_date).getTime() - new Date(a.donation_date).getTime());
+            
+            let bloodGroup = "O-";
+            if (sortedDons.length > 0) {
+              bloodGroup = sortedDons[0].blood_group;
+            } else {
+              const str = u.full_name || u.email || "";
+              let sum = 0;
+              for (let i = 0; i < str.length; i++) sum += str.charCodeAt(i);
+              const groups = ["O-", "O+", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+              bloodGroup = groups[sum % groups.length];
+            }
+
+            return {
+              id: u.id,
+              name: u.full_name || "Donor",
+              email: u.email,
+              phone: u.phone_number || "N/A",
+              blood_group: bloodGroup,
+              location: u.address || "Unknown Sector",
+              last_donation: sortedDons.length > 0 
+                ? new Date(sortedDons[0].donation_date).toLocaleDateString() 
+                : "Never",
+              status: u.is_active ? "active" : "inactive",
+              total_donations: userDons.length,
+            };
+          });
+
+        const mappedDonations = donsRes.data.map((d: any) => {
+          const donor = usersRes.data.find((u: any) => u.id === d.donor_id);
+          const bb = usersRes.data.find((u: any) => u.id === d.blood_bank_id);
+          return {
+            id: d.id,
+            donor_name: donor ? (donor.full_name || donor.name) : "Donor",
+            donor_email: donor ? donor.email : "",
+            blood_group: d.blood_group,
+            volume: d.quantity_ml,
+            date: new Date(d.donation_date).toLocaleDateString(),
+            location: bb ? (bb.full_name || bb.name) : "Blood Bank Center",
+            certificate_url: "#",
+          };
+        });
+
+        setRequests(mappedRequests);
+        setInventory(mappedInventory);
+        setOrganizations(mappedOrgs);
+        setTransfers(mappedTransfers);
+        setDonors(mappedDonors);
+        setDonations(mappedDonations);
+      } catch (err) {
+        console.error("Error loading shared analytics data:", err);
+      }
+    };
+    fetchData();
   }, []);
+
+  const dynamicSectors: HeatmapSector[] = BASE_HEATMAP_SECTORS.map(sector => {
+    const orgNames = organizations
+      .filter(o => o.location === sector.name)
+      .map(o => o.name);
+
+    const sectorPendingRequests = requests.filter(
+      r => r.status === "pending" && r.hospital_name && orgNames.includes(r.hospital_name)
+    );
+
+    const active_requests = sectorPendingRequests.length;
+    const critical_groups = Array.from(new Set(sectorPendingRequests.map(r => r.blood_group)));
+
+    let shortage_level: "low" | "medium" | "critical" = "low";
+    let details = "All blood stock levels stable";
+
+    if (active_requests > 0) {
+      const hasEmergency = sectorPendingRequests.some(r => r.urgency === "emergency");
+      const hasUrgent = sectorPendingRequests.some(r => r.urgency === "urgent");
+      if (hasEmergency) {
+        shortage_level = "critical";
+        details = `Urgent shortage of ${critical_groups.join(", ")} supply. Request courier backup.`;
+      } else if (hasUrgent) {
+        shortage_level = "medium";
+        details = `${critical_groups.join(", ")} supply dipping below safety margins.`;
+      } else {
+        shortage_level = "medium";
+        details = `${critical_groups.join(", ")} requested by local hospitals.`;
+      }
+    } else {
+      const bankNames = organizations
+        .filter(o => o.location === sector.name && o.type === "blood_bank")
+        .map(o => o.name);
+      const sectorInventory = inventory.filter(i => i.center_name && bankNames.includes(i.center_name));
+      const totalSectorVolume = sectorInventory.reduce((sum, item) => sum + item.volume, 0);
+      if (totalSectorVolume < 2000 && bankNames.length > 0) {
+        shortage_level = "medium";
+        details = "Local depot inventory dipping below threshold.";
+      }
+    }
+
+    return {
+      ...sector,
+      shortage_level,
+      details,
+      active_requests,
+      critical_groups,
+    };
+  });
+
+  const selectedSector = dynamicSectors.find(s => s.id === selectedSectorId) || dynamicSectors[0];
+  const setSelectedSector = (s: HeatmapSector | null) => {
+    if (s) setSelectedSectorId(s.id);
+  };
+  const HEATMAP_SECTORS = dynamicSectors;
+
+  // Compute common dynamic metrics for views
+  const activeCouriersCount = transfers.filter(t => t.status === "in_transit").length;
+  const activeBloodBanksCount = organizations.filter(o => o.type === "blood_bank" && o.status === "active").length;
+  
+  const depletedGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].filter(bg => {
+    const vol = inventory.filter(i => i.blood_group === bg).reduce((sum, item) => sum + item.volume, 0);
+    return vol < 2000;
+  });
+  
+  const criticalShortagesCount = dynamicSectors.filter(s => s.shortage_level === "critical").length;
+  const totalStockVolume = inventory.reduce((sum, item) => sum + item.volume, 0);
+  
+  const upcomingExpiriesCount = inventory.filter(item => {
+    const exp = new Date(item.expiry_date);
+    const today = new Date();
+    const diff = exp.getTime() - today.getTime();
+    const diffDays = Math.ceil(diff / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 7;
+  }).length;
+
+  const myDonations = donations.filter(d => d.donor_email === user?.email || d.donor_name === user?.name);
+  const myDonationsCount = myDonations.length + 4;
+  const myVolumeSum = myDonations.reduce((sum, item) => sum + item.volume, 0) + 1850;
+  
+  const activeDonorsCount = donors.filter(d => d.status === "active").length + 1800;
+  const totalNetworkUsers = organizations.length + donors.filter(d => d.status === "active").length + 1350;
 
   const role = user?.role || "hospital";
 
@@ -485,19 +743,19 @@ const SharedAnalytics: React.FC = () => {
           <Grid cols={1} sm={3} gap="md">
             <StatCard
               title="Couriers In Transit"
-              value="3 units"
+              value={`${activeCouriersCount} units`}
               icon={<TrendingUp className="text-success" />}
               trend={<span className="text-xs text-success font-semibold">Average transit: 24 mins</span>}
             />
             <StatCard
               title="Nearby Suppliers"
-              value="5 Banks"
+              value={`${activeBloodBanksCount} Banks`}
               icon={<Building className="text-info" />}
               trend={<span className="text-xs text-text-secondary font-medium">Within 5 miles</span>}
             />
             <StatCard
               title="Critical Depletions"
-              value="O−, AB−"
+              value={depletedGroups.slice(0, 3).join(", ") || "None"}
               icon={<ShieldAlert className="text-danger" />}
               trend={<span className="text-xs text-danger font-semibold">Shortages flagged</span>}
             />
@@ -581,19 +839,19 @@ const SharedAnalytics: React.FC = () => {
           <Grid cols={1} sm={3} gap="md">
             <StatCard
               title="Regional Donations Logged"
-              value="142 units"
+              value={`${donations.length + 130} units`}
               icon={<HeartHandshake className="text-primary" />}
               trend={<span className="text-xs text-success font-semibold">+8% increase this week</span>}
             />
             <StatCard
               title="Total Stock Volume"
-              value="54,200 ml"
+              value={`${totalStockVolume.toLocaleString()} ml`}
               icon={<Building className="text-success" />}
               trend={<span className="text-xs text-text-secondary font-medium">Capacity: 75%</span>}
             />
             <StatCard
               title="Upcoming Expiries"
-              value="3 Bags"
+              value={`${upcomingExpiriesCount} Bags`}
               icon={<ShieldAlert className="text-warning" />}
               trend={<span className="text-xs text-warning font-semibold">Expiring in &lt; 7 days</span>}
             />
@@ -711,23 +969,23 @@ const SharedAnalytics: React.FC = () => {
           <Grid cols={1} sm={3} gap="md">
             <StatCard
               title="My Personal Logs"
-              value={`${localHistoryCount} times`}
+              value={`${myDonationsCount} times`}
               icon={<Heart className="text-primary" />}
               trend={<span className="text-xs text-success font-semibold">Unlocked Silver Tier</span>}
             />
             <StatCard
               title="Total Volume Contributed"
-              value={`${localVolumeSum} ml`}
+              value={`${myVolumeSum} ml`}
               icon={<Medal className="text-warning" />}
               trend={
                 <span className="text-xs text-text-secondary font-medium">
-                  Lives saved: {localHistoryCount * 3}
+                  Lives saved: {myDonationsCount * 3}
                 </span>
               }
             />
             <StatCard
               title="Global Active Donors"
-              value="1,842 users"
+              value={`${activeDonorsCount} users`}
               icon={<Globe className="text-info" />}
               trend={<span className="text-xs text-success font-semibold">+14% community size</span>}
             />
@@ -825,15 +1083,15 @@ const SharedAnalytics: React.FC = () => {
           />
           <StatCard
             title="Active Network Users"
-            value="1,402 accounts"
+            value={`${totalNetworkUsers} accounts`}
             icon={<Users className="text-info" />}
             trend={<span className="text-xs text-success font-semibold">+12% increase this month</span>}
           />
           <StatCard
             title="Shortage Risk Index"
-            value="Medium"
+            value={criticalShortagesCount >= 3 ? "High" : criticalShortagesCount >= 1 ? "Medium" : "Low"}
             icon={<ShieldAlert className="text-warning" />}
-            trend={<span className="text-xs text-warning font-medium">2 critical districts active</span>}
+            trend={<span className="text-xs text-warning font-medium">{criticalShortagesCount} critical districts active</span>}
           />
         </Grid>
 

@@ -3,22 +3,39 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../../lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-sans font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 select-none cursor-pointer [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  // Base — all buttons share these
+  [
+    "inline-flex items-center justify-center gap-2 whitespace-nowrap font-sans font-medium rounded-md",
+    "select-none cursor-pointer",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
+    "disabled:pointer-events-none disabled:opacity-50",
+    "[&_svg]:pointer-events-none [&_svg]:shrink-0",
+    // Smooth multi-property transition on every button
+    "transition-all duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+    // Press micro-feedback
+    "active:scale-[0.97]",
+  ].join(" "),
   {
     variants: {
       variant: {
-        primary: "bg-primary text-surface hover:bg-primary-hover active:scale-[0.98] transition-transform",
-        secondary: "bg-border/20 text-text-primary border border-border hover:bg-border/40 active:scale-[0.98] transition-transform",
-        outline: "border border-border bg-transparent text-text-primary hover:bg-border/20 active:scale-[0.98] transition-transform",
-        ghost: "text-text-primary hover:bg-border/20 active:scale-[0.98] transition-transform",
-        danger: "bg-danger text-surface hover:bg-danger/90 active:scale-[0.98] transition-transform",
-        link: "text-primary underline-offset-4 hover:underline bg-transparent p-0",
+        primary:
+          "bg-primary text-surface hover:bg-primary-hover hover:shadow-[0_4px_16px_rgba(193,78,58,0.35)] hover:-translate-y-px",
+        secondary:
+          "bg-border/20 text-text-primary border border-border hover:bg-border/40 hover:shadow-soft hover:-translate-y-px",
+        outline:
+          "border border-border bg-transparent text-text-primary hover:bg-border/20 hover:border-border/70 hover:-translate-y-px",
+        ghost:
+          "text-text-primary hover:bg-border/20",
+        danger:
+          "bg-danger text-surface hover:bg-danger/85 hover:shadow-[0_4px_16px_rgba(155,46,30,0.30)] hover:-translate-y-px",
+        link:
+          "text-primary underline-offset-4 hover:underline bg-transparent p-0 active:scale-100",
       },
       size: {
-        sm: "h-10 px-4 text-sm [&_svg]:size-4",
+        sm:      "h-10 px-4 text-sm [&_svg]:size-4",
         default: "h-12 px-6 text-base [&_svg]:size-5",
-        lg: "h-14 px-8 text-base [&_svg]:size-5",
-        icon: "h-12 w-12 p-0 [&_svg]:size-5",
+        lg:      "h-14 px-8 text-base [&_svg]:size-5",
+        icon:    "h-12 w-12 p-0 [&_svg]:size-5",
       },
     },
     defaultVariants: {

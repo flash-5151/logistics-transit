@@ -7,56 +7,61 @@ import { Grid } from "@/components/layout/primitives/Grid";
 import { Stack } from "@/components/layout/primitives/Stack";
 import { Row } from "@/components/layout/primitives";
 import { Button } from "@/components/ui/atoms/Button";
-
-interface RequestItem {
-  id: string;
-  blood_group: string;
-  volume: number;
-  urgency: "normal" | "urgent" | "emergency";
-  status: "pending" | "matched" | "in_transit" | "delivered";
-  created_at: string;
-}
+import { useAuthStore } from "@/store/authStore";
+import { api } from "@/services/api";
+import type { BloodRequest } from "@/types/request";
 
 interface DonationRecord {
   id: string;
-  date: string;
-  volume: number;
   blood_group: string;
-  location: string;
-  certificate_url: string;
+  volume: number;
+  date: string;
+  location?: string;
+  certificate_url?: string;
 }
 
-const INITIAL_REQUESTS: RequestItem[] = [
-  { id: "REQ-001", blood_group: "O-", volume: 450, urgency: "emergency", status: "pending", created_at: "2026-06-13 14:10" },
-  { id: "REQ-002", blood_group: "A+", volume: 900, urgency: "urgent", status: "in_transit", created_at: "2026-06-13 12:30" },
-  { id: "REQ-003", blood_group: "B-", volume: 600, urgency: "normal", status: "delivered", created_at: "2026-06-12 18:22" },
-  { id: "REQ-004", blood_group: "AB-", volume: 450, urgency: "emergency", status: "matched", created_at: "2026-06-13 09:15" },
-];
-
 const DonorDashboard: React.FC = () => {
+  const { user } = useAuthStore();
+  const donorName = user?.name || "Donor";
+
   const [bloodType, setBloodType] = useState<string>(() => localStorage.getItem("donor_blood_type") || "O-");
-  const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [requests, setRequests] = useState<BloodRequest[]>([]);
   const [donations, setDonations] = useState<DonationRecord[]>([]);
+  const [organizations, setOrganizations] = useState<any[]>([]);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load requests
-    const savedReq = localStorage.getItem("mock_requests");
-    if (savedReq) {
-      setRequests(JSON.parse(savedReq));
-    } else {
-      setRequests(INITIAL_REQUESTS);
-      localStorage.setItem("mock_requests", JSON.stringify(INITIAL_REQUESTS));
-    }
+    const fetchData = async () => {
+      try {
+        const [reqsRes, donsRes, usersRes] = await Promise.all([
+          api.get("/requests"),
+          api.get("/donations"),
+          api.get("/donors/all-users"),
+        ]);
+        setRequests(reqsRes.data);
+        setOrganizations(usersRes.data);
 
-    // Load donations history
-    const savedDonations = localStorage.getItem("mock_donations");
-    if (savedDonations) {
-      setDonations(JSON.parse(savedDonations));
-    } else {
-      setDonations([]);
-    }
-  }, []);
+        // Filter donations belonging to this donor
+        const mappedDons = donsRes.data
+          .filter((d: any) => d.donor_id === user?.id)
+          .map((d: any) => {
+            const bb = usersRes.data.find((u: any) => u.id === d.blood_bank_id);
+            return {
+              id: d.id,
+              blood_group: d.blood_group,
+              volume: d.quantity_ml,
+              date: new Date(d.donation_date).toLocaleDateString(),
+              location: bb ? (bb.full_name || bb.name) : "Blood Bank Center",
+              certificate_url: "#",
+            };
+          });
+        setDonations(mappedDons);
+      } catch (err) {
+        console.error("Error loading donor dashboard data:", err);
+      }
+    };
+    fetchData();
+  }, [user]);
 
   const handleBloodTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -67,37 +72,13 @@ const DonorDashboard: React.FC = () => {
   // Find matching alerts for the donor's blood type
   const matchingAlerts = requests.filter(r => r.status === "pending" && r.blood_group === bloodType);
 
-  const handlePledgeDonation = (req: RequestItem) => {
-    // Log physical donation
-    const newDonation: DonationRecord = {
-      id: `DON-${Math.floor(800 + Math.random() * 200)}`,
-      date: new Date().toISOString().slice(0, 10),
-      volume: 450,
-      blood_group: bloodType,
-      location: "Saint Mary Emergency Depot",
-      certificate_url: "#"
-    };
+  const getHospitalName = (hospitalId: string) => {
+    const org = organizations.find(o => o.id === hospitalId);
+    return org ? (org.full_name || org.name) : "Hospital";
+  };
 
-    const updatedDons = [newDonation, ...donations];
-    setDonations(updatedDons);
-    localStorage.setItem("mock_donations", JSON.stringify(updatedDons));
-
-    // Update hospital request: deduct 450ml or mark as matched
-    const updatedReqs = requests.map(r => {
-      if (r.id === req.id) {
-        if (r.volume <= 450) {
-          return { ...r, status: "matched" as const };
-        } else {
-          return { ...r, volume: r.volume - 450 }; // Reduce volume required
-        }
-      }
-      return r;
-    });
-
-    setRequests(updatedReqs);
-    localStorage.setItem("mock_requests", JSON.stringify(updatedReqs));
-
-    setSuccessMsg(`Pledge confirmed! 450ml of type ${bloodType} pledged for request ${req.id}. Added to your timeline!`);
+  const handlePledgeDonation = (req: BloodRequest) => {
+    setSuccessMsg(`Pledge confirmed! 450ml of type ${bloodType} pledged for request ${req.id.substring(0, 8)}. Please visit a blood bank center to complete donation.`);
     setTimeout(() => setSuccessMsg(null), 5000);
   };
 
@@ -123,7 +104,7 @@ const DonorDashboard: React.FC = () => {
         {/* Profile and Blood Type Setting */}
         <div className="bg-surface p-6 rounded-lg border border-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-text-primary">Welcome Back, Lifesaver</h2>
+            <h2 className="text-2xl font-bold text-text-primary">Welcome Back, {donorName}</h2>
             <p className="text-text-secondary text-sm mt-0.5">Track your impacts, explore regional needs, and pledge blood logs.</p>
           </div>
 
@@ -149,11 +130,11 @@ const DonorDashboard: React.FC = () => {
         <Grid cols={1} md={3} gap="md">
           <StatCard
             title="My Donations"
-            value={`${donations.length + 4} times`}
+            value={`${donations.length} times`}
             icon={<HeartHandshake className="text-primary" />}
             trend={
               <span className="text-xs text-success font-semibold">
-                Last contribution today
+                Last contribution synced
               </span>
             }
           />
@@ -169,11 +150,11 @@ const DonorDashboard: React.FC = () => {
           />
           <StatCard
             title="Donor Rank"
-            value={getBadgeTier(donations.length + 4)}
+            value={getBadgeTier(donations.length)}
             icon={<Award className="text-warning" />}
             trend={
               <span className="text-xs text-success font-semibold">
-                XP: {(donations.length + 4) * 100} points
+                XP: {donations.length * 100} points
               </span>
             }
           />
@@ -192,8 +173,8 @@ const DonorDashboard: React.FC = () => {
             {matchingAlerts.length > 0 ? (
               <Stack gap="md">
                 {matchingAlerts.map(alert => {
-                  const isEmergency = alert.urgency === "emergency";
-                  const isUrgent = alert.urgency === "urgent";
+                  const isEmergency = alert.priority === "emergency";
+                  const isUrgent = alert.priority === "urgent";
                   return (
                     <div 
                       key={alert.id} 
@@ -220,15 +201,15 @@ const DonorDashboard: React.FC = () => {
                             <span className={`text-xs font-extrabold uppercase tracking-wider ${
                               isEmergency ? "text-danger" : isUrgent ? "text-warning" : "text-info"
                             }`}>
-                              {alert.urgency.toUpperCase()} ALERT
+                              {(alert.priority || "normal").toUpperCase()} ALERT
                             </span>
-                            <span className="text-xs text-text-secondary font-mono font-semibold">• {alert.id}</span>
+                            <span className="text-xs text-text-secondary font-mono font-semibold">• {alert.id.substring(0, 8)}</span>
                           </Row>
-                          <h4 className="font-bold text-base text-text-primary tracking-tight">
-                            Saint Mary Hospital requires <span className="text-primary font-extrabold">{alert.volume} ml</span>
+                          <h4 className="font-bold text-sm text-text-primary">
+                            {getHospitalName(alert.hospital_id)} requesting <span className="text-primary font-bold">{alert.quantity_ml} ml</span> of {alert.blood_group} blood
                           </h4>
-                          <p className="text-xs text-text-secondary flex items-center gap-1">
-                            <MapPin className="h-3.5 w-3.5 shrink-0 text-text-secondary/60" /> Broadcasted {alert.created_at}
+                          <p className="text-xs text-text-secondary flex items-center gap-1 leading-none">
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-text-secondary/60" /> Broadcasted {new Date(alert.created_at).toLocaleDateString()}
                           </p>
                         </Stack>
                       </Row>
@@ -253,7 +234,7 @@ const DonorDashboard: React.FC = () => {
           {/* Quick timeline tracking */}
           <div className="lg:col-span-2 bg-surface p-6 rounded-lg border border-border shadow-sm">
             <h3 className="text-base font-bold text-text-primary mb-4 flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-primary" /> Recent Pledges
+              <Calendar className="h-5 w-5 text-primary" /> Recent Donations
             </h3>
 
             {donations.length > 0 ? (
@@ -266,7 +247,7 @@ const DonorDashboard: React.FC = () => {
                       </div>
                       <Stack gap="xs">
                         <p className="font-bold text-xs text-text-primary leading-tight">{don.location}</p>
-                        <p className="text-xs text-text-secondary font-medium">Pledged on {don.date} • Type {don.blood_group}</p>
+                        <p className="text-xs text-text-secondary font-medium">Donated on {don.date} • Type {don.blood_group}</p>
                       </Stack>
                     </Row>
                     <span className="font-bold text-success text-sm shrink-0">+{don.volume} ml</span>
@@ -275,7 +256,7 @@ const DonorDashboard: React.FC = () => {
               </Stack>
             ) : (
               <div className="text-center py-8 border border-dashed border-border rounded-lg text-text-secondary text-xs">
-                No recent donation pledges recorded. Your pledge history will show here.
+                No recent donations synced. Your physical donation records will show here.
               </div>
             )}
           </div>

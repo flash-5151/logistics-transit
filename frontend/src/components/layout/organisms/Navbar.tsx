@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Bell } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+
 import { useAuthStore } from "@/store/authStore";
 import { Split } from "@/components/layout/primitives/Split";
 import { UserMenu } from "@/components/ui/molecules/user-menu";
@@ -11,8 +11,7 @@ interface NavbarProps {
 }
 
 const Navbar: React.FC<NavbarProps> = ({ title = "Dashboard" }) => {
-  const { user, token, setUser } = useAuthStore();
-  const navigate = useNavigate();
+  const { user } = useAuthStore();
 
   const getInitials = (name: string) => {
     return name
@@ -21,13 +20,6 @@ const Navbar: React.FC<NavbarProps> = ({ title = "Dashboard" }) => {
       .join("")
       .toUpperCase()
       .substring(0, 2);
-  };
-
-  const handleRoleChange = (role: string) => {
-    if (user) {
-      setUser({ ...user, role: role as any });
-      navigate("/");
-    }
   };
 
   const name = user?.name || user?.email || "User";
@@ -41,24 +33,6 @@ const Navbar: React.FC<NavbarProps> = ({ title = "Dashboard" }) => {
 
   const rightSlot = (
     <div className="flex items-center gap-4">
-      {/* Dev Role Switcher */}
-      {token === "mock-bypass-token" && (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold mr-2 select-none">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-          <span>Bypass Mode:</span>
-          <select
-            value={user?.role || "hospital"}
-            onChange={(e) => handleRoleChange(e.target.value)}
-            className="bg-transparent border-none text-amber-500 font-semibold focus:outline-none cursor-pointer pr-1 text-xs"
-          >
-            <option value="hospital" className="text-text-primary bg-surface font-semibold">Hospital</option>
-            <option value="blood_bank" className="text-text-primary bg-surface font-semibold">Blood Bank</option>
-            <option value="donor" className="text-text-primary bg-surface font-semibold">Donor</option>
-            <option value="admin" className="text-text-primary bg-surface font-semibold">Admin</option>
-          </select>
-        </div>
-      )}
-
       {/* Notifications trigger */}
       <button
         className="relative p-2 rounded-full text-text-secondary hover:bg-border/30 hover:text-text-primary transition-colors cursor-pointer"

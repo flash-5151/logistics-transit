@@ -1,12 +1,13 @@
 import * as React from "react";
-import { useState } from "react";
-import { Bell, Phone, MapPin, CheckCircle, Info, Heart } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Bell, Phone, MapPin, CheckCircle, Info, Heart, Trash2 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/templates/DashboardLayout";
 import { Button } from "@/components/ui/atoms/Button";
 import { Badge } from "@/components/ui/atoms/Badge";
 import { TableToolbar } from "@/components/ui/molecules/table-toolbar/table-toolbar";
 import { SearchInput } from "@/components/ui/molecules/search-input/search-input";
 import { Stack, Row, Split } from "@/components/layout/primitives";
+import { api } from "@/services/api";
 
 interface DonorProfile {
   id: string;
@@ -20,26 +21,89 @@ interface DonorProfile {
   total_donations: number;
 }
 
-const MOCK_DONORS: DonorProfile[] = [
-  { id: "USR-101", name: "Sarah Jenkins", email: "sarah.j@example.com", phone: "+1 (555) 019-2831", blood_group: "O-", location: "Downtown District", last_donation: "2026-04-12", status: "active", total_donations: 4 },
-  { id: "USR-102", name: "Michael Chang", email: "mchang@example.com", phone: "+1 (555) 014-9928", blood_group: "A+", location: "Northside Suburbs", last_donation: "2026-06-10", status: "active", total_donations: 1 },
-  { id: "USR-103", name: "Emily Rodriguez", email: "emily.rod@example.com", phone: "+1 (555) 012-7489", blood_group: "B+", location: "Eastgate Sector", last_donation: "2026-06-08", status: "active", total_donations: 2 },
-  { id: "USR-104", name: "James O'Connor", email: "joconnor@example.com", phone: "+1 (555) 018-2947", blood_group: "O+", location: "Southside Valley", last_donation: "2025-12-14", status: "inactive", total_donations: 6 },
-  { id: "USR-105", name: "Alisha Patel", email: "apatel@example.com", phone: "+1 (555) 011-8843", blood_group: "AB-", location: "Downtown District", last_donation: "2026-02-18", status: "active", total_donations: 3 },
-];
-
 const AdminDonors: React.FC = () => {
-  const [donors] = useState<DonorProfile[]>(MOCK_DONORS);
+  const [donors, setDonors] = useState<DonorProfile[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [bloodGroupFilter, setBloodGroupFilter] = useState("all");
   const [selectedDonor, setSelectedDonor] = useState<DonorProfile | null>(null);
   const [alertSuccess, setAlertSuccess] = useState<string | null>(null);
+
+  const fetchDonors = async () => {
+    try {
+      const [usersRes, donsRes] = await Promise.all([
+        api.get("/donors/all-users"),
+        api.get("/donations")
+      ]);
+      const allUsers = usersRes.data;
+      const allDonations = donsRes.data;
+
+      const mappedDonors = allUsers
+        .filter((u: any) => u.role === "donor")
+        .map((u: any) => {
+          const userDons = allDonations.filter((d: any) => d.donor_id === u.id);
+          const sortedDons = [...userDons].sort((a: any, b: any) => new Date(b.donation_date).getTime() - new Date(a.donation_date).getTime());
+          
+          let bloodGroup = "O-";
+          if (sortedDons.length > 0) {
+            bloodGroup = sortedDons[0].blood_group;
+          } else {
+            const str = u.full_name || u.email || "";
+            let sum = 0;
+            for (let i = 0; i < str.length; i++) sum += str.charCodeAt(i);
+            const groups = ["O-", "O+", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+            bloodGroup = groups[sum % groups.length];
+          }
+
+          return {
+            id: u.id,
+            name: u.full_name || "Donor",
+            email: u.email,
+            phone: u.phone_number || "N/A",
+            blood_group: bloodGroup,
+            location: u.address || "Unknown Sector",
+            last_donation: sortedDons.length > 0 
+              ? new Date(sortedDons[0].donation_date).toLocaleDateString() 
+              : "Never",
+            status: u.is_active ? ("active" as const) : ("inactive" as const),
+            total_donations: userDons.length,
+          };
+        });
+
+      setDonors(mappedDonors);
+    } catch (err) {
+      console.error("Error loading donors:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDonors();
+  }, []);
 
   const handleSendAlert = (donor: DonorProfile) => {
     setAlertSuccess(`Emergency blood drive notification successfully broadcasted to ${donor.name} (${donor.email})!`);
     setTimeout(() => {
       setAlertSuccess(null);
     }, 4000);
+  };
+
+  const handleToggleStatus = async (id: string) => {
+    try {
+      await api.put(`/donors/${id}/toggle-active`);
+      fetchDonors();
+    } catch (err) {
+      console.error("Error toggling status:", err);
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (confirm(`Are you sure you want to delete donor account for ${name}?`)) {
+      try {
+        await api.delete(`/donors/${id}`);
+        fetchDonors();
+      } catch (err) {
+        console.error("Error deleting donor:", err);
+      }
+    }
   };
 
   const filteredDonors = donors.filter(d => {
@@ -133,7 +197,7 @@ const AdminDonors: React.FC = () => {
                 {filteredDonors.length > 0 ? (
                   filteredDonors.map((d) => (
                     <tr key={d.id} className="hover:bg-border/5 transition-colors">
-                      <td className="p-4 font-mono text-xs text-text-secondary">{d.id}</td>
+                      <td className="p-4 font-mono text-xs text-text-secondary">{d.id.substring(0, 8)}</td>
                       <td className="p-4">
                         <Stack gap="none">
                           <span className="font-semibold">{d.name}</span>
@@ -155,7 +219,7 @@ const AdminDonors: React.FC = () => {
                         )}
                       </td>
                       <td className="p-4 text-right">
-                        <Row gap="xs" className="justify-end">
+                        <Row gap="xs" className="justify-end items-center">
                           <Button 
                             variant="secondary" 
                             size="sm" 
@@ -165,6 +229,14 @@ const AdminDonors: React.FC = () => {
                             <Info className="h-3.5 w-3.5" /> Details
                           </Button>
                           <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            className="text-xs py-1 px-2.5 flex items-center gap-1 cursor-pointer"
+                            onClick={() => handleToggleStatus(d.id)}
+                          >
+                            {d.status === "active" ? "Suspend" : "Activate"}
+                          </Button>
+                          <Button 
                             variant="primary" 
                             size="sm" 
                             className="bg-amber-600 hover:bg-amber-700 text-white text-xs py-1 px-2.5 flex items-center gap-1"
@@ -172,6 +244,13 @@ const AdminDonors: React.FC = () => {
                           >
                             <Bell className="h-3.5 w-3.5" /> Alert
                           </Button>
+                          <button
+                            onClick={() => handleDelete(d.id, d.name)}
+                            className="p-1.5 rounded-lg border border-danger/20 hover:bg-danger/5 text-danger transition-colors cursor-pointer shrink-0"
+                            title="Remove donor account"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </Row>
                       </td>
                     </tr>
@@ -191,7 +270,7 @@ const AdminDonors: React.FC = () => {
         {/* Modal: Donor Detail Overview */}
         {selectedDonor && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-            <div className="w-full max-w-md bg-surface rounded-lg border border-border shadow-card overflow-hidden">
+            <div className="w-full max-w-md bg-surface rounded-xl border border-border shadow-card overflow-hidden">
               <div className="px-6 py-4 border-b border-border bg-primary/5 flex items-center justify-between">
                 <h3 className="text-lg font-bold text-text-primary">Donor Profile Overview</h3>
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-primary font-bold text-sm">

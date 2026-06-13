@@ -1,7 +1,7 @@
 @theme {
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
-  
+
   @keyframes accordion-down {
     from { height: 0; }
     to { height: var(--radix-accordion-content-height); }
@@ -13,12 +13,135 @@
 }
 
 @layer utilities {
-  .animate-fade-in {
-    animation: fadeIn 0.3s ease-in-out;
+
+  /* ── Page entry — used by DashboardLayout main content ── */
+  .animate-page-in {
+    animation: pageIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes pageIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
+  /* ── Fade in (generic) ── */
+  .animate-fade-in {
+    animation: fadeIn 0.25s ease-out both;
+  }
   @keyframes fadeIn {
     from { opacity: 0; }
-    to { opacity: 1; }
+    to   { opacity: 1; }
+  }
+
+  /* ── Fade + slide up (cards, panels entering DOM) ── */
+  .animate-slide-up {
+    animation: slideUp 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* ── Scale in (modals, dropdowns) ── */
+  .animate-scale-in {
+    animation: scaleIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* ── Staggered children — apply to a container ── */
+  .animate-stagger > * {
+    animation: slideUp 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .animate-stagger > *:nth-child(1) { animation-delay: 0ms;  }
+  .animate-stagger > *:nth-child(2) { animation-delay: 60ms; }
+  .animate-stagger > *:nth-child(3) { animation-delay: 120ms;}
+  .animate-stagger > *:nth-child(4) { animation-delay: 180ms;}
+  .animate-stagger > *:nth-child(5) { animation-delay: 240ms;}
+  .animate-stagger > *:nth-child(6) { animation-delay: 300ms;}
+
+  /* ── Badge pulse (for urgent/critical indicators) ── */
+  .animate-pulse-soft {
+    animation: pulseSoft 2.4s ease-in-out infinite;
+  }
+  @keyframes pulseSoft {
+    0%, 100% { opacity: 1;    }
+    50%       { opacity: 0.65; }
+  }
+
+  /* ── Shimmer (loading skeleton) ── */
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-border) 25%,
+      color-mix(in srgb, var(--color-border) 60%, white) 50%,
+      var(--color-border) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0%   { background-position: 200% center; }
+    100% { background-position: -200% center; }
+  }
+
+  /* ── Card hover lift ── */
+  .hover-lift {
+    transition:
+      transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 0.18s ease;
+  }
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(74, 62, 61, 0.10);
+  }
+
+  /* ── Interactive row (table rows, list items) ── */
+  .hover-row {
+    transition: background-color 0.15s ease;
+  }
+
+  /* ── Sidebar nav link indicator ── */
+  .nav-link {
+    position: relative;
+    transition:
+      background-color 0.18s ease,
+      color 0.18s ease,
+      padding-left 0.18s ease;
+  }
+  .nav-link::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%) scaleY(0);
+    width: 3px;
+    height: 60%;
+    background: #C14E3A;
+    border-radius: 0 2px 2px 0;
+    transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-link-active::before {
+    transform: translateY(-50%) scaleY(1);
   }
 }

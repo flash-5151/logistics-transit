@@ -4,9 +4,10 @@ import { HeartHandshake, CheckCircle, Mail, User } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/templates/DashboardLayout";
 import { Button } from "@/components/ui/atoms/Button";
 import { Input } from "@/components/ui/atoms/Input";
-import { Badge } from "@/components/ui/atoms/Badge";
 import { FormField } from "@/components/ui/molecules/form-field";
-import { Stack, Row, Split, Grid } from "@/components/layout/primitives";
+import { Stack, Row, Grid } from "@/components/layout/primitives";
+import { useAuthStore } from "@/store/authStore";
+import { api } from "@/services/api";
 
 interface DonationRecord {
   id: string;
@@ -17,14 +18,10 @@ interface DonationRecord {
   date: string;
 }
 
-const DEFAULT_DONATIONS: DonationRecord[] = [
-  { id: "DON-001", donor_name: "Sarah Jenkins", donor_email: "sarah.j@example.com", blood_group: "O-", volume: 450, date: "2026-06-12" },
-  { id: "DON-002", donor_name: "Michael Chang", donor_email: "mchang@example.com", blood_group: "A+", volume: 500, date: "2026-06-10" },
-  { id: "DON-003", donor_name: "Emily Rodriguez", donor_email: "emily.rod@example.com", blood_group: "B+", volume: 450, date: "2026-06-08" },
-];
-
 const BloodBankDonations: React.FC = () => {
+  const { user } = useAuthStore();
   const [donations, setDonations] = useState<DonationRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Form states
@@ -37,20 +34,39 @@ const BloodBankDonations: React.FC = () => {
   // Validation errors
   const [errors, setErrors] = useState<{ donorName?: string; donorEmail?: string; bloodGroup?: string; volume?: string; date?: string }>({});
 
-  useEffect(() => {
-    const saved = localStorage.getItem("mock_donations");
-    if (saved) {
-      setDonations(JSON.parse(saved));
-    } else {
-      setDonations(DEFAULT_DONATIONS);
-      localStorage.setItem("mock_donations", JSON.stringify(DEFAULT_DONATIONS));
-    }
-  }, []);
+  const fetchDonations = async () => {
+    try {
+      const [donsRes, usersRes] = await Promise.all([
+        api.get("/donations"),
+        api.get("/donors/all-users")
+      ]);
 
-  const saveDonations = (updated: DonationRecord[]) => {
-    setDonations(updated);
-    localStorage.setItem("mock_donations", JSON.stringify(updated));
+      const filtered = donsRes.data
+        .filter((d: any) => d.blood_bank_id === user?.id)
+        .map((d: any) => {
+          const donorObj = usersRes.data.find((u: any) => u.id === d.donor_id);
+          return {
+            id: d.id,
+            donor_name: donorObj ? (donorObj.full_name || donorObj.name) : "Anonymous Donor",
+            donor_email: donorObj ? donorObj.email : "N/A",
+            blood_group: d.blood_group,
+            volume: d.quantity_ml,
+            date: new Date(d.donation_date).toLocaleDateString(),
+          };
+        });
+      setDonations(filtered);
+    } catch (err) {
+      console.error("Error loading donations:", err);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchDonations();
+    }
+  }, [user]);
 
   // Real-time validations
   const validateField = (field: string, val: string) => {
@@ -104,59 +120,66 @@ const BloodBankDonations: React.FC = () => {
     validateField(field, value);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Final checks
     if (errors.donorName || errors.donorEmail || errors.bloodGroup || errors.volume || errors.date || !donorName || !donorEmail || !bloodGroup || !volume || !date) {
       return;
     }
 
-    const newDonation: DonationRecord = {
-      id: `DON-${Math.floor(100 + Math.random() * 900)}`,
-      donor_name: donorName,
-      donor_email: donorEmail,
-      blood_group: bloodGroup,
-      volume: parseInt(volume, 10),
-      date,
-    };
+    try {
+      // 1. Fetch all users to see if donor exists
+      const usersRes = await api.get("/donors/all-users");
+      let donor = usersRes.data.find((u: any) => u.email === donorEmail && u.role === "donor");
 
-    // 1. Add to Donations history
-    const updatedDonations = [newDonation, ...donations];
-    saveDonations(updatedDonations);
+      // 2. If donor does not exist, create account on-the-fly
+      if (!donor) {
+        const registerPayload = {
+          email: donorEmail,
+          password: "Password123!",
+          full_name: donorName,
+          role: "donor",
+          address: "Downtown District",
+          phone_number: "+1 (555) 000-0000",
+          is_active: true
+        };
+        const regRes = await api.post("/auth/register", registerPayload);
+        donor = regRes.data;
+      }
 
-    // 2. Automatically sync / insert into Inventory in localStorage
-    const savedInventory = localStorage.getItem("mock_inventory");
-    const currentInventory = savedInventory ? JSON.parse(savedInventory) : [];
-    
-    // Calculate expiry date: 35 days from donation date
-    const expDate = new Date(date);
-    expDate.setDate(expDate.getDate() + 35);
-    const expStr = expDate.toISOString().split("T")[0];
+      // 3. Calculate expiry: 35 days from donation date
+      const expDate = new Date(date);
+      expDate.setDate(expDate.getDate() + 35);
 
-    const newInventoryItem = {
-      id: `BAG-${Math.floor(800 + Math.random() * 200)}`,
-      blood_group: bloodGroup,
-      volume: parseInt(volume, 10),
-      expiry_date: expStr,
-      location: `Fridge-${["A", "B", "C"][Math.floor(Math.random() * 3)]}${Math.floor(1 + Math.random() * 4)}`,
-    };
+      // 4. Post donation record
+      const donationPayload = {
+        donor_id: donor.id,
+        blood_bank_id: user?.id,
+        blood_group: bloodGroup,
+        quantity_ml: parseInt(volume, 10),
+        expiry_date: expDate.toISOString()
+      };
 
-    localStorage.setItem("mock_inventory", JSON.stringify([newInventoryItem, ...currentInventory]));
+      await api.post("/donations/", donationPayload);
 
-    // Success notification
-    setSuccessMessage(`Donation successfully logged! A new stock unit (${newInventoryItem.id}) has been added to inventory.`);
-    
-    // Reset Form
-    setDonorName("");
-    setDonorEmail("");
-    setBloodGroup("");
-    setVolume("");
-    setErrors({});
-    
-    setTimeout(() => {
-      setSuccessMessage(null);
-    }, 5000);
+      setSuccessMessage(`Donation successfully logged for ${donorName}! Active stock has been updated.`);
+      
+      // Reset Form
+      setDonorName("");
+      setDonorEmail("");
+      setBloodGroup("");
+      setVolume("");
+      setErrors({});
+      
+      fetchDonations();
+
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 5000);
+    } catch (err) {
+      console.error("Error logging donation:", err);
+      alert("Failed to log donation. Please try again.");
+    }
   };
 
   const isFormInvalid = !!(
@@ -196,28 +219,29 @@ const BloodBankDonations: React.FC = () => {
                 <Grid cols={1} sm={2} gap="md">
                   <FormField label="Donor Full Name" required error={errors.donorName}>
                     <Input
-                      placeholder="Sarah Jenkins"
+                      placeholder="e.g. Sarah Jenkins"
                       value={donorName}
                       onChange={(e) => handleInputChange("donorName", e.target.value, setDonorName)}
-                      leftIcon={<User className="h-4 w-4 text-text-secondary" />}
                       className={errors.donorName ? "border-danger focus-visible:ring-danger" : ""}
                     />
                   </FormField>
 
                   <FormField label="Donor Email Address" required error={errors.donorEmail}>
-                    <Input
-                      type="email"
-                      placeholder="sarah@example.com"
-                      value={donorEmail}
-                      onChange={(e) => handleInputChange("donorEmail", e.target.value, setDonorEmail)}
-                      leftIcon={<Mail className="h-4 w-4 text-text-secondary" />}
-                      className={errors.donorEmail ? "border-danger focus-visible:ring-danger" : ""}
-                    />
+                    <div className="relative">
+                      <Input
+                        type="email"
+                        placeholder="e.g. sarah.j@example.com"
+                        value={donorEmail}
+                        onChange={(e) => handleInputChange("donorEmail", e.target.value, setDonorEmail)}
+                        className={errors.donorEmail ? "border-danger focus-visible:ring-danger pl-9" : "pl-9"}
+                      />
+                      <Mail className="absolute left-3 top-3 h-4 w-4 text-text-secondary/60" />
+                    </div>
                   </FormField>
                 </Grid>
 
                 <Grid cols={1} sm={3} gap="md">
-                  <FormField label="Blood Type" required error={errors.bloodGroup}>
+                  <FormField label="Blood Group" required error={errors.bloodGroup}>
                     <select
                       value={bloodGroup}
                       onChange={(e) => handleInputChange("bloodGroup", e.target.value, setBloodGroup)}
@@ -225,7 +249,7 @@ const BloodBankDonations: React.FC = () => {
                         errors.bloodGroup ? "border-danger" : "border-border"
                       }`}
                     >
-                      <option value="">Select</option>
+                      <option value="">Group</option>
                       <option value="A+">A+</option>
                       <option value="A-">A-</option>
                       <option value="B+">B+</option>
@@ -237,7 +261,7 @@ const BloodBankDonations: React.FC = () => {
                     </select>
                   </FormField>
 
-                  <FormField label="Volume (ml)" required error={errors.volume}>
+                  <FormField label="Volume Collected (ml)" required error={errors.volume}>
                     <Input
                       type="number"
                       placeholder="e.g. 450"
@@ -247,7 +271,7 @@ const BloodBankDonations: React.FC = () => {
                     />
                   </FormField>
 
-                  <FormField label="Collection Date" required error={errors.date}>
+                  <FormField label="Donation Date" required error={errors.date}>
                     <Input
                       type="date"
                       value={date}
@@ -257,46 +281,45 @@ const BloodBankDonations: React.FC = () => {
                   </FormField>
                 </Grid>
 
-                <Button type="submit" disabled={isFormInvalid} className="w-full mt-4">
-                  Register Donation Log
-                </Button>
+                <Row gap="sm" className="justify-end pt-4 border-t border-border mt-2">
+                  <Button type="submit" disabled={isFormInvalid}>
+                    Save Donation Record
+                  </Button>
+                </Row>
               </Stack>
             </form>
           </div>
 
-          {/* History Panel */}
+          {/* Recent Records list */}
           <div className="md:col-span-2 bg-surface p-6 rounded-lg border border-border shadow-sm">
-            <h3 className="text-base font-bold text-text-primary mb-4">
-              Recently Logged
+            <h3 className="text-base font-bold text-text-primary mb-4 flex items-center gap-2">
+              Recent Logged Collections
             </h3>
-            
-            <div className="divide-y divide-border max-h-96 overflow-y-auto">
-              {donations.map((d) => (
-                <div key={d.id} className="py-3.5 first:pt-0 last:pb-0">
-                  <Split
-                    slots={{
-                      left: (
-                        <div>
-                          <p className="font-semibold text-sm text-text-primary">{d.donor_name}</p>
-                          <p className="text-xs text-text-secondary mt-0.5 font-mono">{d.donor_email}</p>
-                        </div>
-                      ),
-                      right: (
-                        <div className="text-right">
-                          <Badge variant="default" className="text-xs font-bold">{d.blood_group}</Badge>
-                          <p className="text-xs text-text-secondary mt-1 font-semibold">{d.volume} ml</p>
-                        </div>
-                      ),
-                    }}
-                  />
-                  <div className="flex items-center gap-1.5 mt-2 text-[10px] font-medium text-text-secondary uppercase tracking-wider">
-                    <span>ID: {d.id}</span>
-                    <span>•</span>
-                    <span>Logged on: {d.date}</span>
+
+            {loading ? (
+              <p className="text-xs text-text-secondary">Loading history...</p>
+            ) : donations.length > 0 ? (
+              <Stack gap="sm" className="max-h-[360px] overflow-y-auto pr-1">
+                {donations.map((don) => (
+                  <div key={don.id} className="p-3.5 border border-border/80 hover:bg-border/5 rounded-xl transition-all shadow-xs flex items-center justify-between">
+                    <Row gap="xs" className="items-center">
+                      <div className="h-8 w-8 rounded-full bg-[#251C1A]/5 text-primary flex items-center justify-center shrink-0">
+                        <User className="h-4.5 w-4.5" />
+                      </div>
+                      <Stack gap="none">
+                        <p className="font-bold text-xs text-text-primary leading-tight">{don.donor_name}</p>
+                        <p className="text-[10px] text-text-secondary mt-0.5">{don.date} • Type {don.blood_group}</p>
+                      </Stack>
+                    </Row>
+                    <span className="text-xs font-bold text-success">+{don.volume} ml</span>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </Stack>
+            ) : (
+              <div className="text-center py-12 border border-dashed border-border rounded-lg text-text-secondary text-xs italic">
+                No recent collections registered.
+              </div>
+            )}
           </div>
         </Grid>
       </Stack>

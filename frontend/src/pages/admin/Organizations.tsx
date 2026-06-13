@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/atoms/Input";
 import { FormField } from "@/components/ui/molecules/form-field";
 import { SearchInput } from "@/components/ui/molecules/search-input/search-input";
 import { Grid, Stack, Row, Split } from "@/components/layout/primitives";
+import { api } from "@/services/api";
 
 interface Organization {
   id: string;
@@ -18,14 +19,6 @@ interface Organization {
   contact: string;
   status: "active" | "suspended";
 }
-
-const DEFAULT_ORGANIZATIONS: Organization[] = [
-  { id: "ORG-001", name: "Saint Mary Emergency Hospital", type: "hospital", location: "Downtown District", contact: "+1 (555) 019-8831", status: "active" },
-  { id: "ORG-002", name: "City General Blood Bank", type: "blood_bank", location: "Eastgate Sector", contact: "+1 (555) 012-7489", status: "active" },
-  { id: "ORG-003", name: "Red Cross Depot", type: "blood_bank", location: "Northside Suburbs", contact: "+1 (555) 014-9928", status: "active" },
-  { id: "ORG-004", name: "Valley Health Hospital", type: "hospital", location: "Southside Valley", contact: "+1 (555) 018-2947", status: "active" },
-  { id: "ORG-005", name: "Saint Mary Clinic", type: "hospital", location: "Westside Heights", contact: "+1 (555) 015-6677", status: "suspended" },
-];
 
 const SECTOR_OPTIONS = [
   "Downtown District",
@@ -52,20 +45,28 @@ const AdminOrganizations: React.FC = () => {
   // Validation errors
   const [errors, setErrors] = useState<{ name?: string; type?: string; location?: string; contact?: string }>({});
 
-  useEffect(() => {
-    const saved = localStorage.getItem("mock_organizations");
-    if (saved) {
-      setOrganizations(JSON.parse(saved));
-    } else {
-      setOrganizations(DEFAULT_ORGANIZATIONS);
-      localStorage.setItem("mock_organizations", JSON.stringify(DEFAULT_ORGANIZATIONS));
+  const fetchOrganizations = async () => {
+    try {
+      const res = await api.get("/donors/all-users");
+      const mapped = res.data
+        .filter((u: any) => u.role === "hospital" || u.role === "blood_bank")
+        .map((u: any) => ({
+          id: u.id,
+          name: u.full_name || "Organization",
+          type: u.role,
+          location: u.address || "Unknown Sector",
+          contact: u.phone_number || "N/A",
+          status: u.is_active ? "active" : "suspended",
+        }));
+      setOrganizations(mapped);
+    } catch (err) {
+      console.error("Error loading organizations:", err);
     }
-  }, []);
-
-  const saveOrganizations = (updated: Organization[]) => {
-    setOrganizations(updated);
-    localStorage.setItem("mock_organizations", JSON.stringify(updated));
   };
+
+  useEffect(() => {
+    fetchOrganizations();
+  }, []);
 
   // Real-time validations
   const validateField = (field: string, val: string) => {
@@ -116,7 +117,7 @@ const AdminOrganizations: React.FC = () => {
     validateField(field, val);
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     validateField("name", name);
     validateField("type", type);
@@ -127,45 +128,52 @@ const AdminOrganizations: React.FC = () => {
       return;
     }
 
-    const newOrg: Organization = {
-      id: `ORG-${Math.floor(100 + Math.random() * 900)}`,
-      name,
-      type: type as any,
-      location,
-      contact,
-      status: "active"
-    };
+    try {
+      const registerPayload = {
+        email: `${name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()}@bloodline.com`,
+        password: "Password123!",
+        full_name: name,
+        role: type, // "hospital" or "blood_bank"
+        address: location,
+        phone_number: contact,
+        is_active: true
+      };
+      await api.post("/auth/register", registerPayload);
 
-    const updated = [newOrg, ...organizations];
-    saveOrganizations(updated);
+      // Reset Form
+      setName("");
+      setType("");
+      setLocation("");
+      setContact("");
+      setErrors({});
+      setIsModalOpen(false);
 
-    // Reset Form
-    setName("");
-    setType("");
-    setLocation("");
-    setContact("");
-    setErrors({});
-    setIsModalOpen(false);
-
-    setSuccessMsg(`Registered organization "${newOrg.name}" successfully.`);
-    setTimeout(() => setSuccessMsg(null), 5000);
+      setSuccessMsg(`Registered organization "${name}" successfully.`);
+      setTimeout(() => setSuccessMsg(null), 5000);
+      fetchOrganizations();
+    } catch (err) {
+      console.error("Error registering organization:", err);
+      alert("Failed to register organization. Please try again.");
+    }
   };
 
-  const handleToggleStatus = (id: string) => {
-    const updated = organizations.map(org => {
-      if (org.id === id) {
-        const nextStatus = org.status === "active" ? "suspended" as const : "active" as const;
-        return { ...org, status: nextStatus };
-      }
-      return org;
-    });
-    saveOrganizations(updated);
+  const handleToggleStatus = async (id: string) => {
+    try {
+      await api.put(`/donors/${id}/toggle-active`);
+      fetchOrganizations();
+    } catch (err) {
+      console.error("Error toggling status:", err);
+    }
   };
 
-  const handleDelete = (id: string, orgName: string) => {
+  const handleDelete = async (id: string, orgName: string) => {
     if (confirm(`Are you sure you want to remove ${orgName}?`)) {
-      const updated = organizations.filter(org => org.id !== id);
-      saveOrganizations(updated);
+      try {
+        await api.delete(`/donors/${id}`);
+        fetchOrganizations();
+      } catch (err) {
+        console.error("Error deleting organization:", err);
+      }
     }
   };
 
@@ -294,7 +302,7 @@ const AdminOrganizations: React.FC = () => {
                             <Badge variant={isHospital ? "info" : "success"} className="text-xs uppercase font-extrabold tracking-wider px-2.5 py-0.5 rounded-md">
                               {isHospital ? "Hospital" : "Blood Bank"}
                             </Badge>
-                            <span className="text-xs text-text-secondary font-mono font-semibold">({org.id})</span>
+                            <span className="text-xs text-text-secondary font-mono font-semibold">({org.id.substring(0, 8)})</span>
                           </Row>
                           <h3 className="font-extrabold text-lg text-text-primary tracking-tight mt-1">{org.name}</h3>
                         </Stack>

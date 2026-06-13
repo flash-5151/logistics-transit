@@ -12,20 +12,12 @@ function App() {
       if (token) {
         try {
           setLoading(true);
-          if (token === "mock-bypass-token") {
-            console.warn("Bypassing session restoration for mock token.");
-            setUser({
-              id: "1",
-              email: "test@bypass.com",
-              name: "Bypass User",
-              role: "hospital",
-              created_at: new Date().toISOString(),
-            });
-            setLoading(false);
-            return;
-          }
           const response = await api.get("/auth/me");
-          setUser(response.data);
+          const userData = response.data;
+          setUser({
+            ...userData,
+            name: userData.full_name || userData.name || "User",
+          });
         } catch (error) {
           console.error("Failed to restore auth session:", error);
           useAuthStore.getState().logout();

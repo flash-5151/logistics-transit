@@ -71,10 +71,22 @@ export const HeatmapMap: React.FC<HeatmapMapProps> = ({
       zoom: 11,
       zoomControl: true,
       attributionControl: true,
-      scrollWheelZoom: false,   // disabled — prevents hijacking page scroll
-      doubleClickZoom: true,    // zoom by double-clicking still works
-      dragging: true,           // panning by drag still works
+      scrollWheelZoom: false, // mouse wheel scroll → page scrolls normally
+      touchZoom: false,       // trackpad pinch → page zoom, not map zoom
+      doubleClickZoom: true,  // double-click to zoom still works
+      dragging: true,         // click-and-drag pan still works
     });
+
+    // Mac trackpads send pinch as ctrl+wheel events.
+    // Leaflet intercepts these even when scrollWheelZoom is false,
+    // so we block them at the DOM level and let the browser handle them.
+    const container = map.getContainer();
+    const blockCtrlWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.stopPropagation();
+      }
+    };
+    container.addEventListener("wheel", blockCtrlWheel, { capture: true, passive: true });
 
     // OpenStreetMap dark-styled tiles via CartoDB
     L.tileLayer(
@@ -90,6 +102,7 @@ export const HeatmapMap: React.FC<HeatmapMapProps> = ({
     mapInstanceRef.current = map;
 
     return () => {
+      container.removeEventListener("wheel", blockCtrlWheel, { capture: true });
       map.remove();
       mapInstanceRef.current = null;
       polygonLayersRef.current.clear();

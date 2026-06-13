@@ -2,9 +2,15 @@
   :root {
     --background: var(--color-background);
     --foreground: var(--color-text-primary);
+
+    /* Global transition speed tokens */
+    --duration-fast:   120ms;
+    --duration-base:   200ms;
+    --duration-slow:   320ms;
+    --ease-out:        cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-in-out:     cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  /* Remove fixed root widths. Use min-height 100vh instead. */
   #root {
     min-height: 100vh;
     display: flex;
@@ -18,9 +24,40 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Basic resets */
   *, *::before, *::after {
     box-sizing: border-box;
+  }
+
+  /* ── Universal interactive baseline ──────────────────────────
+     Every focusable / clickable element gets a smooth base
+     transition so no element ever snaps abruptly. Individual
+     components can override with more specific transitions.
+  ─────────────────────────────────────────────────────────── */
+  a,
+  button,
+  [role="button"],
+  input,
+  textarea,
+  select,
+  label[for] {
+    transition:
+      color         var(--duration-base) var(--ease-in-out),
+      background-color var(--duration-base) var(--ease-in-out),
+      border-color  var(--duration-base) var(--ease-in-out),
+      box-shadow    var(--duration-base) var(--ease-in-out),
+      opacity       var(--duration-base) var(--ease-in-out);
+  }
+
+  /* ── Focus ring — consistent across all roles ── */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* ── Smooth scrolling ── */
+  html {
+    scroll-behavior: smooth;
   }
 }
 

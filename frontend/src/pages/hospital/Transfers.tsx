@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/atoms/Badge";
 import { TableToolbar } from "@/components/ui/molecules/table-toolbar/table-toolbar";
 import { SearchInput } from "@/components/ui/molecules/search-input/search-input";
 import { Stack, Row, Split, Grid } from "@/components/layout/primitives";
+import { useAuthStore } from "@/store/authStore";
+import { api } from "@/services/api";
 
 interface TransferItem {
   id: string;
@@ -18,52 +20,66 @@ interface TransferItem {
   eta: string;
 }
 
-const DEFAULT_TRANSFERS: TransferItem[] = [
-  { id: "TR-501", request_id: "REQ-002", source: "Red Cross Center", blood_group: "A+", volume: 900, status: "in_transit", eta: "15 mins" },
-  { id: "TR-502", request_id: "REQ-004", source: "City General Blood Bank", blood_group: "AB-", volume: 450, status: "pending", eta: "45 mins" },
-];
-
 const HospitalTransfers: React.FC = () => {
+  const { user } = useAuthStore();
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("mock_transfers");
-    if (saved) {
-      setTransfers(JSON.parse(saved));
-    } else {
-      setTransfers(DEFAULT_TRANSFERS);
-      localStorage.setItem("mock_transfers", JSON.stringify(DEFAULT_TRANSFERS));
+  const fetchTransfers = async () => {
+    try {
+      const [transRes, usersRes, reqsRes] = await Promise.all([
+        api.get("/transfers"),
+        api.get("/donors/all-users"),
+        api.get("/requests")
+      ]);
+
+      const filtered = transRes.data
+        .filter((t: any) => t.receiver_id === user?.id)
+        .map((t: any) => {
+          const req = reqsRes.data.find((r: any) => r.id === t.request_id);
+          const sourceUser = usersRes.data.find((u: any) => u.id === t.sender_id);
+          return {
+            id: t.id,
+            request_id: t.request_id || "N/A",
+            source: sourceUser ? (sourceUser.full_name || sourceUser.name) : "Red Cross Center",
+            blood_group: req ? req.blood_group : "O-",
+            volume: req ? req.quantity_ml : 450,
+            status: t.status === "requested" ? "pending" : t.status,
+            eta: t.status === "requested" ? "45 mins" : t.status === "in_transit" ? "15 mins" : "--",
+          };
+        });
+      setTransfers(filtered);
+    } catch (err) {
+      console.error("Error fetching transfers:", err);
+    } finally {
+      setLoading(false);
     }
-  }, []);
-
-  const saveTransfers = (updated: TransferItem[]) => {
-    setTransfers(updated);
-    localStorage.setItem("mock_transfers", JSON.stringify(updated));
   };
 
-  const advanceStatus = (id: string) => {
-    const updated = transfers.map((t) => {
-      if (t.id === id) {
-        if (t.status === "pending") {
-          return { ...t, status: "in_transit" as const, eta: "25 mins" };
-        } else if (t.status === "in_transit") {
-          // Update corresponding request in localStorage as well
-          const savedReqs = localStorage.getItem("mock_requests");
-          if (savedReqs) {
-            const reqs = JSON.parse(savedReqs);
-            const updatedReqs = reqs.map((r: any) => 
-              r.id === t.request_id ? { ...r, status: "delivered" } : r
-            );
-            localStorage.setItem("mock_requests", JSON.stringify(updatedReqs));
-          }
-          return { ...t, status: "delivered" as const, eta: "--" };
-        }
+  useEffect(() => {
+    if (user?.id) {
+      fetchTransfers();
+    }
+  }, [user]);
+
+  const advanceStatus = async (id: string) => {
+    const t = transfers.find((item) => item.id === id);
+    if (!t) return;
+
+    try {
+      const nextStatus = t.status === "pending" ? "in_transit" : "delivered";
+      await api.patch(`/transfers/${id}`, { status: nextStatus });
+      
+      if (nextStatus === "delivered" && t.request_id !== "N/A") {
+        await api.patch(`/requests/${t.request_id}`, { status: "completed" });
       }
-      return t;
-    });
-    saveTransfers(updated);
+      
+      fetchTransfers();
+    } catch (err) {
+      console.error("Error advancing status:", err);
+    }
   };
 
   const getStatusIcon = (status: string) => {
@@ -113,88 +129,98 @@ const HospitalTransfers: React.FC = () => {
         </div>
 
         {/* Transfers Grid */}
-        <Grid cols={1} md={2} gap="md">
-          {filteredTransfers.filter(t => t.status !== "delivered").map((t) => (
-            <div key={t.id} className="p-6 bg-surface rounded-lg border border-border shadow-sm flex flex-col justify-between">
-              <Stack gap="md">
-                <Split
-                  slots={{
-                    left: (
-                      <Row gap="sm" className="items-center">
-                        <div className="p-2.5 rounded-lg bg-primary/10 text-primary">
-                          <Package className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="font-semibold text-text-primary text-sm">{t.id}</p>
-                          <p className="text-xs text-text-secondary">Req Ref: <span className="font-mono font-medium">{t.request_id}</span></p>
-                        </div>
-                      </Row>
-                    ),
-                    right: getStatusBadge(t.status),
-                  }}
-                />
+        <div className="mt-2">
+          {loading ? (
+            <p className="text-sm text-text-secondary">Loading transfers...</p>
+          ) : filteredTransfers.filter(t => t.status !== "delivered").length > 0 ? (
+            <Grid cols={1} md={2} gap="md">
+              {filteredTransfers.filter(t => t.status !== "delivered").map((t) => (
+                <div key={t.id} className="p-6 bg-surface rounded-lg border border-border shadow-sm flex flex-col justify-between">
+                  <Stack gap="md">
+                    <Split
+                      slots={{
+                        left: (
+                          <Row gap="sm" className="items-center">
+                            <div className="p-2.5 rounded-lg bg-primary/10 text-primary">
+                              <Package className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <p className="font-semibold text-text-primary text-sm">{t.id.substring(0, 8)}</p>
+                              <p className="text-xs text-text-secondary">Req Ref: <span className="font-mono font-medium">{t.request_id.substring(0, 8)}</span></p>
+                            </div>
+                          </Row>
+                        ),
+                        right: getStatusBadge(t.status),
+                      }}
+                    />
 
-                {/* Progress Visual Tracker */}
-                <div className="relative mt-4">
-                  <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-border -translate-y-1/2" />
-                  <div 
-                    className="absolute top-1/2 left-0 h-0.5 bg-primary -translate-y-1/2 transition-all duration-300"
-                    style={{ width: t.status === "pending" ? "15%" : t.status === "in_transit" ? "55%" : "100%" }}
-                  />
-                  <div className="relative flex justify-between">
-                    <div className="flex flex-col items-center gap-1 bg-surface px-2">
-                      <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${
-                        t.status !== "pending" ? "bg-primary border-primary text-white" : "border-border text-text-secondary"
-                      }`}>1</div>
-                      <span className="text-[10px] font-medium text-text-secondary">Dispatched</span>
+                    {/* Progress Visual Tracker */}
+                    <div className="relative mt-4">
+                      <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-border -translate-y-1/2" />
+                      <div 
+                        className="absolute top-1/2 left-0 h-0.5 bg-primary -translate-y-1/2 transition-all duration-300"
+                        style={{ width: t.status === "pending" ? "15%" : t.status === "in_transit" ? "55%" : "100%" }}
+                      />
+                      <div className="relative flex justify-between">
+                        <div className="flex flex-col items-center gap-1 bg-surface px-2">
+                          <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${
+                            t.status !== "pending" ? "bg-primary border-primary text-white" : "border-border text-text-secondary"
+                          }`}>1</div>
+                          <span className="text-[10px] font-medium text-text-secondary">Dispatched</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-1 bg-surface px-2">
+                          <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${
+                            t.status === "in_transit" || t.status === "delivered" ? "bg-primary border-primary text-white" : "border-border text-text-secondary"
+                          }`}>2</div>
+                          <span className="text-[10px] font-medium text-text-secondary">In Transit</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-1 bg-surface px-2">
+                          <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${
+                            t.status === "delivered" ? "bg-primary border-primary text-white" : "border-border text-text-secondary"
+                          }`}>3</div>
+                          <span className="text-[10px] font-medium text-text-secondary">Delivered</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex flex-col items-center gap-1 bg-surface px-2">
-                      <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${
-                        t.status === "in_transit" || t.status === "delivered" ? "bg-primary border-primary text-white" : "border-border text-text-secondary"
-                      }`}>2</div>
-                      <span className="text-[10px] font-medium text-text-secondary">In Transit</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-1 bg-surface px-2">
-                      <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${
-                        t.status === "delivered" ? "bg-primary border-primary text-white" : "border-border text-text-secondary"
-                      }`}>3</div>
-                      <span className="text-[10px] font-medium text-text-secondary">Delivered</span>
-                    </div>
-                  </div>
+
+                    <Grid cols={2} gap="sm" className="mt-4 border-t border-border pt-4 text-xs">
+                      <div>
+                        <span className="text-text-secondary block">Supplier</span>
+                        <span className="font-semibold text-text-primary text-sm flex items-center gap-1 mt-0.5">
+                          <MapPin className="h-3 w-3 text-primary" /> {t.source}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-text-secondary block">Contents</span>
+                        <span className="font-semibold text-text-primary text-sm mt-0.5">
+                          Type {t.blood_group} ({t.volume}ml)
+                        </span>
+                      </div>
+                    </Grid>
+                  </Stack>
+
+                  <Row gap="sm" className="justify-between items-center border-t border-border pt-4 mt-6">
+                    <Row gap="xs" className="text-text-secondary text-xs items-center">
+                      <Clock className="h-4 w-4 text-text-secondary" />
+                      <span>ETA: <strong className="text-text-primary font-semibold">{t.eta}</strong></span>
+                    </Row>
+                    <Button 
+                      size="sm" 
+                      onClick={() => advanceStatus(t.id)}
+                      className="text-xs py-1.5 px-3 cursor-pointer"
+                    >
+                      {t.status === "pending" ? "Ship Transit" : "Mark Received"}
+                    </Button>
+                  </Row>
                 </div>
-
-                <Grid cols={2} gap="sm" className="mt-4 border-t border-border pt-4 text-xs">
-                  <div>
-                    <span className="text-text-secondary block">Supplier</span>
-                    <span className="font-semibold text-text-primary text-sm flex items-center gap-1 mt-0.5">
-                      <MapPin className="h-3 w-3 text-primary" /> {t.source}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-text-secondary block">Contents</span>
-                    <span className="font-semibold text-text-primary text-sm mt-0.5">
-                      Type {t.blood_group} ({t.volume}ml)
-                    </span>
-                  </div>
-                </Grid>
-              </Stack>
-
-              <Row gap="sm" className="justify-between items-center border-t border-border pt-4 mt-6">
-                <Row gap="xs" className="text-text-secondary text-xs items-center">
-                  <Clock className="h-4 w-4 text-text-secondary" />
-                  <span>ETA: <strong className="text-text-primary font-semibold">{t.eta}</strong></span>
-                </Row>
-                <Button 
-                  size="sm" 
-                  onClick={() => advanceStatus(t.id)}
-                  className="text-xs py-1.5 px-3"
-                >
-                  {t.status === "pending" ? "Ship Transit" : "Mark Received"}
-                </Button>
-              </Row>
+              ))}
+            </Grid>
+          ) : (
+            <div className="text-center py-12 border border-dashed border-border rounded-lg bg-surface/50 text-text-secondary text-xs italic">
+              No active inbound transfers.
             </div>
-          ))}
-        </Grid>
+          )}
+        </div>
 
         {/* Complete Table History */}
         <div className="bg-surface rounded-lg border border-border overflow-hidden mt-4">
@@ -241,14 +267,14 @@ const HospitalTransfers: React.FC = () => {
               <tbody className="divide-y divide-border text-sm text-text-primary">
                 {filteredTransfers.map((t) => (
                   <tr key={t.id} className="hover:bg-border/5 transition-colors">
-                    <td className="p-4 font-mono font-semibold">{t.id}</td>
-                    <td className="p-4 font-mono text-text-secondary">{t.request_id}</td>
+                    <td className="p-4 font-mono font-semibold">{t.id.substring(0, 8)}</td>
+                    <td className="p-4 font-mono text-text-secondary">{t.request_id.substring(0, 8)}</td>
                     <td className="p-4">{t.source}</td>
                     <td className="p-4 font-medium">{t.blood_group} ({t.volume}ml)</td>
                     <td className="p-4">
                       <Row gap="xs" className="items-center">
                         {getStatusIcon(t.status)}
-                        <span>{t.status.replace("_", " ")}</span>
+                        <span className="capitalize">{t.status.replace("_", " ")}</span>
                       </Row>
                     </td>
                     <td className="p-4 font-semibold text-text-secondary">{t.eta}</td>

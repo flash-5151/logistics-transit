@@ -7,7 +7,6 @@ import { FormField } from "@/components/ui/molecules/form-field";
 import { Stack } from "@/components/layout/primitives/Stack";
 import { useAuthStore } from "@/store/authStore";
 import { api } from "@/services/api";
-import type { UserRole } from "@/types/user";
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState("");
@@ -94,28 +93,16 @@ const Login: React.FC = () => {
         },
       });
 
+      const userData = userRes.data;
+      const mappedUser = {
+        ...userData,
+        name: userData.full_name || userData.name || "User",
+      };
+
       // Login to store
-      loginStore(access_token, userRes.data);
+      loginStore(access_token, mappedUser);
       navigate("/");
     } catch (err: any) {
-      if (err.code === "ERR_NETWORK" || err.message?.includes("Network Error")) {
-        console.warn("Backend not connected, bypassing login.");
-        let userRole: UserRole = "hospital";
-        if (email.includes("donor")) userRole = "donor";
-        if (email.includes("bank")) userRole = "blood_bank";
-        if (email.includes("admin")) userRole = "admin";
-
-        loginStore("mock-bypass-token", {
-          id: "1",
-          email,
-          name: "Bypass User",
-          role: userRole,
-          created_at: new Date().toISOString(),
-        });
-        navigate("/");
-        return;
-      }
-
       console.error(err);
       let errorMessage = "Invalid email or password. Please try again.";
       if (err.response?.data?.detail) {
@@ -189,6 +176,7 @@ const Login: React.FC = () => {
                 Register here
               </Link>
             </p>
+
           </Stack>
         </form>
       </div>

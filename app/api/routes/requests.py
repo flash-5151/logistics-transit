@@ -57,3 +57,34 @@ async def match_request(
     matching_service = MatchingService(db)
     matches = await matching_service.find_matches(id)
     return {"request_id": id, "matches": matches}
+
+
+@router.delete("/{id}", response_model=BloodRequest)
+async def delete_request(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(allow_hospital_admin)
+):
+    repo = RequestRepository(db)
+    db_obj = await repo.get(id)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if current_user.role == UserRole.HOSPITAL and db_obj.hospital_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this request")
+    return await repo.remove(id=id)
+
+
+@router.patch("/{id}", response_model=BloodRequest)
+async def update_request(
+    id: UUID,
+    obj_in: BloodRequestUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    repo = RequestRepository(db)
+    db_obj = await repo.get(id)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return await repo.update(db_obj=db_obj, obj_in=obj_in.dict(exclude_unset=True))
+
+

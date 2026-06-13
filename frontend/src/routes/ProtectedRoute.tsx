@@ -8,7 +8,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles }) => {
-  const { isAuthenticated, user, isLoading, token } = useAuthStore();
+  const { isAuthenticated, user, isLoading } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -28,17 +28,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles }) => {
   }
 
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    if (token === "mock-bypass-token") {
-      const targetPath =
-        user.role === "admin"
-          ? "/analytics"
-          : user.role === "blood_bank"
-          ? "/bloodbank"
-          : user.role === "donor"
-          ? "/donor"
-          : "/hospital";
-      return <Navigate to={targetPath} replace />;
-    }
     return <Navigate to="/403" replace />;
   }
 

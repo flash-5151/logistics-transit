@@ -190,12 +190,6 @@ const Register: React.FC = () => {
       await api.post("/auth/register", payload);
       navigate("/login", { state: { registered: true } });
     } catch (err: any) {
-      if (err.code === "ERR_NETWORK" || err.message?.includes("Network Error")) {
-        console.warn("Backend not connected, bypassing registration.");
-        navigate("/login", { state: { registered: true } });
-        return;
-      }
-
       console.error(err);
       let errorMessage = "Registration failed. Please try again.";
       if (err.response?.data?.detail) {

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     DB_PORT: int = Field(5432, env="DB_PORT")
     DB_NAME: str = Field("fastapi_issue_tracker_db", env="DB_NAME")
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @computed_field
     def DATABASE_URL(self) -> str:
