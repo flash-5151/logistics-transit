@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
-import { Building, Plus, Trash2, ToggleLeft, ToggleRight, Phone, MapPin, CheckCircle, Building2 } from "lucide-react";
+import { Building, Plus, Trash2, ToggleLeft, ToggleRight, Phone, MapPin, CheckCircle, Building2, Upload } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/templates/DashboardLayout";
 import { StatCard } from "@/components/ui/molecules/stat-card";
 import { Badge } from "@/components/ui/atoms/Badge";
@@ -33,10 +33,19 @@ const AdminOrganizations: React.FC = () => {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "hospital" | "blood_bank">("all");
+  
+  // Single registration modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Form states
+  // Bulk CSV Import modal state
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [csvData, setCsvData] = useState<any[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // Single registration Form states
   const [name, setName] = useState("");
   const [type, setType] = useState<"hospital" | "blood_bank" | "">("");
   const [location, setLocation] = useState("");
@@ -68,7 +77,7 @@ const AdminOrganizations: React.FC = () => {
     fetchOrganizations();
   }, []);
 
-  // Real-time validations
+  // Real-time validations for single registration
   const validateField = (field: string, val: string) => {
     const newErrors = { ...errors };
 
@@ -133,7 +142,7 @@ const AdminOrganizations: React.FC = () => {
         email: `${name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()}@bloodline.com`,
         password: "Password123!",
         full_name: name,
-        role: type, // "hospital" or "blood_bank"
+        role: type,
         address: location,
         phone_number: contact,
         is_active: true
@@ -155,6 +164,120 @@ const AdminOrganizations: React.FC = () => {
       console.error("Error registering organization:", err);
       alert("Failed to register organization. Please try again.");
     }
+  };
+
+  // CSV Parsing and Upload
+  const parseCSV = (text: string) => {
+    const lines = text.split(/\r?\n/);
+    if (lines.length <= 1) return [];
+
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+    const expectedHeaders = ["name", "type", "location", "contact", "email"];
+    
+    // Check missing headers
+    const missingHeaders = expectedHeaders.filter(h => h !== "email" && !headers.includes(h));
+    if (missingHeaders.length > 0) {
+      setImportErrors([`Invalid file structure. Missing columns: ${missingHeaders.join(", ")}`]);
+      return [];
+    }
+
+    const rows: any[] = [];
+    const errorsList: string[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
+      
+      const rowData: Record<string, string> = {};
+      headers.forEach((h, index) => {
+        rowData[h] = values[index] || "";
+      });
+
+      const rowNum = i + 1;
+      const { name: orgName, type: orgType, location: orgLoc, contact: orgContact } = rowData;
+
+      if (!orgName) errorsList.push(`Row ${rowNum}: Name is required`);
+      if (!orgType) {
+        errorsList.push(`Row ${rowNum}: Type is required`);
+      } else if (orgType.toLowerCase() !== "hospital" && orgType.toLowerCase() !== "blood_bank") {
+        errorsList.push(`Row ${rowNum}: Type must be 'hospital' or 'blood_bank'`);
+      }
+      if (!orgLoc) errorsList.push(`Row ${rowNum}: Location sector is required`);
+      if (!orgContact) errorsList.push(`Row ${rowNum}: Contact number is required`);
+
+      rows.push(rowData);
+    }
+
+    if (errorsList.length > 0) {
+      setImportErrors(errorsList);
+      return [];
+    }
+
+    setImportErrors([]);
+    return rows;
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportStatus(null);
+    setImportErrors([]);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const parsed = parseCSV(text);
+      setCsvData(parsed);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImportSubmit = async () => {
+    if (csvData.length === 0 || importErrors.length > 0) return;
+
+    setIsImporting(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < csvData.length; i++) {
+      const row = csvData[i];
+      const orgName = row.name;
+      const orgType = row.type.toLowerCase();
+      const orgLoc = row.location;
+      const orgContact = row.contact;
+      const orgEmail = row.email || `${orgName.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()}@bloodline.com`;
+
+      setImportStatus(`Importing: ${orgName} (${i + 1} of ${csvData.length})...`);
+
+      try {
+        const registerPayload = {
+          email: orgEmail,
+          password: "Password123!",
+          full_name: orgName,
+          role: orgType,
+          address: orgLoc,
+          phone_number: orgContact,
+          is_active: true
+        };
+        await api.post("/auth/register", registerPayload);
+        successCount++;
+      } catch (err: any) {
+        console.error(`Failed to import row ${i + 2}:`, err);
+        failCount++;
+      }
+    }
+
+    setIsImporting(false);
+    setCsvData([]);
+    setImportStatus(null);
+    setIsImportModalOpen(false);
+
+    setSuccessMsg(`Import complete. Successfully registered ${successCount} organizations. ${failCount} skipped/failed.`);
+    fetchOrganizations();
+    setTimeout(() => setSuccessMsg(null), 5000);
   };
 
   const handleToggleStatus = async (id: string) => {
@@ -213,9 +336,14 @@ const AdminOrganizations: React.FC = () => {
               </div>
             ),
             right: (
-              <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 shrink-0">
-                <Plus className="h-4 w-4" /> Register Organization
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button onClick={() => setIsImportModalOpen(true)} variant="secondary" className="flex items-center gap-2 border border-border">
+                  <Upload className="h-4 w-4" /> Import CSV
+                </Button>
+                <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
+                  <Plus className="h-4 w-4" /> Register Organization
+                </Button>
+              </div>
             ),
           }}
         />
@@ -435,6 +563,78 @@ const AdminOrganizations: React.FC = () => {
                   </Row>
                 </Stack>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Bulk Import Organizations via CSV */}
+        {isImportModalOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+            <div className="w-full max-w-md bg-surface rounded-xl border border-border shadow-card overflow-hidden">
+              <div className="px-6 py-4 border-b border-border bg-primary/5">
+                <h3 className="text-lg font-bold text-text-primary">Import Organizations from CSV</h3>
+              </div>
+              <div className="p-6">
+                <Stack gap="md">
+                  <div>
+                    <p className="text-xs text-text-secondary font-medium leading-relaxed">
+                      Select a standard CSV file to bulk-register organizations. The file must contain the following header columns:
+                    </p>
+                    <pre className="mt-2 p-2 bg-[#251C1A]/5 border border-border rounded text-[10px] font-mono text-text-primary overflow-x-auto select-all">
+                      name,type,location,contact,email
+                    </pre>
+                    <p className="text-[10px] text-text-secondary italic mt-1">
+                      * Notes: "type" must be 'hospital' or 'blood_bank'. If "email" is blank, it will be auto-generated.
+                    </p>
+                  </div>
+
+                  {importErrors.length > 0 && (
+                    <div className="p-3.5 bg-danger/10 border border-danger/20 rounded-lg text-danger max-h-[120px] overflow-y-auto">
+                      <p className="text-xs font-bold mb-1">Validation errors found:</p>
+                      <ul className="list-disc pl-4 text-[10px] font-medium gap-0.5 flex flex-col">
+                        {importErrors.map((err, i) => <li key={i}>{err}</li>)}
+                      </ul>
+                    </div>
+                  )}
+
+                  {importStatus && (
+                    <div className="p-3 bg-info/10 border border-info/20 rounded-lg text-info text-xs font-bold">
+                      {importStatus}
+                    </div>
+                  )}
+
+                  <FormField label="Select CSV File" required>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileChange}
+                      className="w-full text-xs text-text-secondary file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+                    />
+                  </FormField>
+
+                  <Row gap="sm" className="justify-end pt-4 border-t border-border mt-2">
+                    <Button 
+                      type="button" 
+                      variant="secondary" 
+                      onClick={() => { 
+                        setIsImportModalOpen(false); 
+                        setImportErrors([]); 
+                        setImportStatus(null); 
+                        setCsvData([]);
+                      }}
+                      disabled={isImporting}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleImportSubmit} 
+                      disabled={csvData.length === 0 || importErrors.length > 0 || isImporting}
+                    >
+                      {isImporting ? "Importing..." : `Import ${csvData.length} Rows`}
+                    </Button>
+                  </Row>
+                </Stack>
+              </div>
             </div>
           </div>
         )}
